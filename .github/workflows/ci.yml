@@ -1,0 +1,204 @@
+name: CI / Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Lint & Test ─────────────────────────────────────────────────────────
+  test:
+    name: Lint & Test
+    runs-on: macos-14          # Apple M1 arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # full history needed for git rev-list (.build-number)
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+  # ─── Build DMG + ZIP ─────────────────────────────────────────────────────
+  build:
+    name: Build arm64 DMG
+    needs: test
+    # Build on every push to main and on every tag; skip for PRs
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+
+      - name: Build arm64 distribution
+        run: npm run dist:arm64
+        env:
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+          # Prevent electron-builder from searching for a Developer ID cert.
+          # Ad-hoc signing is handled by build/afterPack.js instead.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prateek-term-arm64
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 30
+
+  # ─── GitHub Release ───────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prateek-term-arm64
+          path: dist/
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          TAG="${{ github.ref_name }}"
+
+          # Find the previous tag to scope the changelog
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1)
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+            echo "Changes since ${PREV_TAG}:"
+          else
+            RANGE="HEAD"
+            echo "Initial release:"
+          fi
+
+          # Parse conventional commits into sections
+          get_commits() {
+            local prefix="$1"
+            git log $RANGE --pretty=format:"%s" --no-merges \
+              | grep -E "^${prefix}(\(.+\))?:" \
+              | sed "s/^${prefix}(\(.*\)): /\`\1\` — /" \
+              | sed "s/^${prefix}: //" \
+              | sed 's/^/- /' \
+              || true
+          }
+
+          FEATS=$(get_commits "feat")
+          FIXES=$(get_commits "fix")
+          PERFS=$(get_commits "perf")
+          REFACTORS=$(get_commits "refactor")
+          DOCS=$(get_commits "docs")
+          CHORES=$(get_commits "chore|ci|test")
+
+          BODY="## Prateek-Term ${VERSION}
+
+          > macOS arm64 — Apple Silicon only
+
+          ### Download
+          | File | Description |
+          |------|-------------|
+          | \`Prateek-Term-${VERSION}-arm64.dmg\` | Drag-and-drop installer |
+          | \`Prateek-Term-${VERSION}-arm64.zip\` | Portable app bundle |
+
+          > **Note:** The app uses ad-hoc signing. If macOS shows a security warning, right-click the app → Open → Open anyway.
+          "
+
+          if [ -n "$FEATS" ]; then
+            BODY="${BODY}
+          ### 🚀 New Features
+          ${FEATS}"
+          fi
+
+          if [ -n "$FIXES" ]; then
+            BODY="${BODY}
+          ### 🐛 Bug Fixes
+          ${FIXES}"
+          fi
+
+          if [ -n "$PERFS" ]; then
+            BODY="${BODY}
+          ### ⚡ Performance
+          ${PERFS}"
+          fi
+
+          if [ -n "$REFACTORS" ]; then
+            BODY="${BODY}
+          ### 🔧 Improvements
+          ${REFACTORS}"
+          fi
+
+          if [ -n "$DOCS" ]; then
+            BODY="${BODY}
+          ### 📚 Documentation
+          ${DOCS}"
+          fi
+
+          if [ -n "$CHORES" ]; then
+            BODY="${BODY}
+          ### 🔨 Maintenance
+          ${CHORES}"
+          fi
+
+          # Write to a file to avoid escaping issues
+          echo "$BODY" > release-notes.md
+          cat release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Prateek-Term ${{ needs.build.outputs.version }}"
+          body_path: release-notes.md
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
