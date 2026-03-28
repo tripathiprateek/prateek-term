@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Background: very deep navy -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#0A1628"/>
+      <stop offset="100%" stop-color="#020C1B"/>
+    </linearGradient>
+
+    <!-- Hexagon stroke: electric cobalt -->
+    <linearGradient id="hexStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2979FF"/>
+      <stop offset="60%" stop-color="#0052CC"/>
+      <stop offset="100%" stop-color="#00B0FF"/>
+    </linearGradient>
+
+    <!-- Inner hex fill glow -->
+    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1565C0" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#0A1628" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glow filter for hex ring -->
+    <filter id="hexGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Glow filter for the >_ prompt -->
+    <filter id="promptGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Drop shadow for whole icon -->
+    <filter id="iconShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="10" stdDeviation="30" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- macOS rounded square -->
+  <rect x="28" y="28" width="968" height="968" rx="218" ry="218"
+        fill="url(#bg)" filter="url(#iconShadow)"/>
+
+  <!-- Subtle border -->
+  <rect x="29" y="29" width="966" height="966" rx="217" ry="217"
+        fill="none" stroke="#0D2144" stroke-width="2"/>
+
+  <!-- Ambient center glow blob -->
+  <circle cx="512" cy="512" r="340" fill="url(#centerGlow)"/>
+
+  <!-- Faint scan-lines for texture (very subtle) -->
+  <g opacity="0.025" stroke="#4DA6FF" stroke-width="1">
+    <line x1="28" y1="350" x2="996" y2="350"/>
+    <line x1="28" y1="400" x2="996" y2="400"/>
+    <line x1="28" y1="450" x2="996" y2="450"/>
+    <line x1="28" y1="500" x2="996" y2="500"/>
+    <line x1="28" y1="550" x2="996" y2="550"/>
+    <line x1="28" y1="600" x2="996" y2="600"/>
+    <line x1="28" y1="650" x2="996" y2="650"/>
+  </g>
+
+  <!-- ═══ HEXAGON (cobalt crystal lattice) ═══ -->
+  <!-- Flat-top hexagon, radius 272, centered at 512,512 -->
+  <!-- Vertices: top(512,240), TR(748,376), BR(748,648), bot(512,784), BL(276,648), TL(276,376) -->
+
+  <!-- Outer glow copy (blurred, lower opacity) -->
+  <g filter="url(#hexGlow)" opacity="0.6">
+    <polygon
+      points="512,240 748,376 748,648 512,784 276,648 276,376"
+      fill="none" stroke="#1E88E5" stroke-width="28" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Main hexagon ring -->
+  <polygon
+    points="512,240 748,376 748,648 512,784 276,648 276,376"
+    fill="none" stroke="url(#hexStroke)" stroke-width="20" stroke-linejoin="round"/>
+
+  <!-- Vertex accent dots -->
+  <g fill="#2979FF" opacity="0.9">
+    <circle cx="512" cy="240" r="13"/>
+    <circle cx="748" cy="376" r="10"/>
+    <circle cx="748" cy="648" r="10"/>
+    <circle cx="512" cy="784" r="13"/>
+    <circle cx="276" cy="648" r="10"/>
+    <circle cx="276" cy="376" r="10"/>
+  </g>
+  <!-- Vertex dot glow -->
+  <g fill="#00B0FF" opacity="0.45">
+    <circle cx="512" cy="240" r="22"/>
+    <circle cx="512" cy="784" r="22"/>
+  </g>
+
+  <!-- ═══ >_ PROMPT (path-drawn for crisp rendering) ═══ -->
+  <g filter="url(#promptGlow)">
+    <!-- > caret: two strokes meeting at a point -->
+    <polyline
+      points="286,390 462,512 286,634"
+      fill="none" stroke="white" stroke-width="58"
+      stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- _ underline cursor -->
+    <line x1="498" y1="648" x2="726" y2="648"
+          stroke="white" stroke-width="52" stroke-linecap="round"/>
+  </g>
+
+  <!-- Top-right corner hint: tiny cobalt dots (signal feel) -->
+  <g fill="#2979FF" opacity="0.25">
+    <circle cx="756" cy="248" r="5"/>
+    <circle cx="778" cy="272" r="3.5"/>
+    <circle cx="800" cy="256" r="3"/>
+    <circle cx="762" cy="296" r="3"/>
+  </g>
+  <!-- Bottom-left mirror -->
+  <g fill="#00B0FF" opacity="0.2">
+    <circle cx="268" cy="776" r="5"/>
+    <circle cx="246" cy="752" r="3.5"/>
+    <circle cx="224" cy="768" r="3"/>
+    <circle cx="262" cy="728" r="3"/>
+  </g>
+</svg>

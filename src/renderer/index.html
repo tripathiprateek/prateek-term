@@ -1,0 +1,803 @@
+<!--
+  Prateek-Term — macOS Terminal Emulator & SSH Connection Manager
+  Copyright (c) 2026 Prateek Tripathi | tripathiprateek@gmail.com
+  License  : Polyform Noncommercial License 1.0.0
+             Non-commercial use only. Attribution required for derivative works.
+             Commercial use requires prior written permission from the author.
+  See      : LICENSE file in project root for full terms.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;">
+  <title>Prateek-Term</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Title Bar -->
+  <div id="titlebar">
+    <div class="titlebar-drag-region">
+      <span class="titlebar-app-name">Prateek-Term</span>
+    </div>
+    <div class="titlebar-buttons">
+      <button id="btn-toggle-sidebar" title="Toggle Sidebar (⌘B)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="9" y1="3" x2="9" y2="21"></line>
+        </svg>
+      </button>
+      <button id="btn-new-tab" title="New Local Terminal (⌘T)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+      <button id="btn-settings" title="Settings (⌘,)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+      <button id="btn-connection-manager" title="Connection Manager (⌘K)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 2H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"></path>
+          <path d="M21 13H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1z"></path>
+          <circle cx="7" cy="7" r="1" fill="currentColor"></circle>
+          <circle cx="7" cy="18" r="1" fill="currentColor"></circle>
+        </svg>
+      </button>
+      <button id="btn-help" title="Help (⌘/)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.5 9.5a3 3 0 1 1 3 4.5v1"></path>
+          <circle cx="12" cy="18" r="0.5" fill="currentColor" stroke="none"></circle>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Tab Bar -->
+  <div id="tab-bar">
+    <div id="tabs-container"></div>
+  </div>
+
+  <!-- Main Area: Sidebar + Terminal -->
+  <div id="main-area">
+    <!-- Hosts Sidebar (collapsible) -->
+    <div id="hosts-sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">Hosts</span>
+        <button id="btn-sidebar-add" class="sidebar-add-btn" title="Add New Device (⌘K)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          New Device
+        </button>
+      </div>
+
+      <div class="sidebar-search">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="sidebar-search-input" placeholder="Filter hosts...">
+      </div>
+
+      <!-- Tag filter chips -->
+      <div id="sidebar-tag-filters" class="sidebar-tag-filters"></div>
+
+      <!-- Grouped hosts list -->
+      <div id="sidebar-hosts-list" class="sidebar-hosts-list"></div>
+    </div>
+
+    <!-- Terminal Container -->
+    <div id="terminal-container"></div>
+  </div>
+
+  <!-- Connection Manager Modal -->
+  <div id="connection-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 2H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"></path>
+            <circle cx="7" cy="7" r="1" fill="currentColor"></circle>
+          </svg>
+          Hosts
+        </h2>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="connection-layout">
+
+          <!-- Saved Profiles Sidebar -->
+          <div class="profiles-sidebar">
+            <div class="profiles-header">
+              <div class="profiles-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="profiles-search-input" placeholder="Search hosts...">
+              </div>
+            </div>
+            <div class="profiles-filter">
+              <select id="filter-protocol">
+                <option value="all">All Protocols</option>
+                <option value="ssh">SSH / SFTP / SCP</option>
+                <option value="telnet">Telnet</option>
+                <option value="ftp">FTP</option>
+              </select>
+            </div>
+            <div id="profiles-list" class="profiles-list"></div>
+            <div class="profiles-footer">
+              <button id="btn-new-profile" class="btn btn-primary btn-block">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add New Device
+              </button>
+            </div>
+          </div>
+
+          <!-- Connection Form -->
+          <div class="connection-form-container">
+            <form id="connection-form">
+
+              <!-- Section: General -->
+              <div class="form-section-header">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                General
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-2">
+                  <label for="conn-name">Label</label>
+                  <input type="text" id="conn-name" placeholder="e.g. Production Web Server" required>
+                </div>
+                <div class="form-group flex-1">
+                  <label for="conn-protocol">Protocol</label>
+                  <select id="conn-protocol" required>
+                    <option value="ssh">SSH</option>
+                    <option value="telnet">Telnet</option>
+                    <option value="ftp">FTP</option>
+                    <option value="serial">Serial</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-3">
+                  <label for="conn-host">Hostname or IP</label>
+                  <input type="text" id="conn-host" placeholder="192.168.1.1 or example.com">
+                </div>
+                <div class="form-group flex-1">
+                  <label for="conn-port">Port</label>
+                  <input type="number" id="conn-port" placeholder="22">
+                </div>
+                <div class="form-group flex-1">
+                  <label for="conn-username">Username</label>
+                  <input type="text" id="conn-username" placeholder="root">
+                </div>
+              </div>
+
+              <!-- Section: Tags -->
+              <div class="form-section">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                    <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                  </svg>
+                  Tags
+                </div>
+                <div id="conn-tags-container" class="tags-container">
+                  <div id="conn-tags-list" class="tags-list"></div>
+                  <div class="tag-add-row">
+                    <div class="tag-input-wrapper">
+                      <input type="text" id="conn-tag-input" class="tag-input" placeholder="Add tag..." autocomplete="off">
+                      <div id="tag-suggestions" class="tag-suggestions hidden"></div>
+                    </div>
+                    <input type="color" id="conn-tag-color" class="tag-color-picker" value="#89b4fa" title="Tag color">
+                    <button type="button" id="btn-add-tag" class="btn btn-small btn-secondary">Add</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Section: Authentication (SSH only) -->
+              <div id="auth-section" class="form-section">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  Authentication
+                </div>
+
+                <div class="auth-type-selector">
+                  <button type="button" class="auth-type-btn active" data-auth="key">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                    </svg>
+                    Key
+                  </button>
+                  <button type="button" class="auth-type-btn" data-auth="password">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    Password
+                  </button>
+                  <button type="button" class="auth-type-btn" data-auth="none">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="4 17 10 11 4 5"></polyline>
+                      <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    Ask on connect
+                  </button>
+                </div>
+
+                <div id="auth-key-section">
+                  <div class="key-input-toggle">
+                    <button type="button" class="key-toggle-btn active" data-keymode="file">Browse File</button>
+                    <button type="button" class="key-toggle-btn" data-keymode="paste">Paste Key</button>
+                  </div>
+
+                  <!-- File mode -->
+                  <div id="key-file-section" class="form-row">
+                    <div class="form-group">
+                      <label for="conn-pem">Identity File</label>
+                      <div class="input-with-button">
+                        <input type="text" id="conn-pem" placeholder="Select private key file..." readonly>
+                        <button type="button" id="btn-browse-pem" class="btn btn-small btn-secondary">Browse</button>
+                        <button type="button" id="btn-clear-pem" class="btn btn-small btn-ghost">Clear</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Paste mode -->
+                  <div id="key-paste-section" class="form-row hidden">
+                    <div class="form-group">
+                      <label for="conn-pem-text">Paste Private Key</label>
+                      <textarea id="conn-pem-text" class="pem-textarea" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;paste your key here...&#10;-----END OPENSSH PRIVATE KEY-----" spellcheck="false"></textarea>
+                      <span class="form-hint">Key will be saved to a secure temp file and used as identity</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="auth-password-section" class="form-row hidden">
+                  <div class="form-group">
+                    <label for="conn-password">Password</label>
+                    <div class="input-with-button">
+                      <input type="password" id="conn-password" placeholder="Enter password" autocomplete="off">
+                      <button type="button" id="btn-toggle-password" class="btn btn-small btn-ghost" title="Show/hide password">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                      </button>
+                    </div>
+                    <span class="form-hint">Password is passed via SSHPASS env var (requires sshpass installed)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Section: SSH Mode (SSH only) -->
+              <div id="ssh-mode-section" class="form-section">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="4 17 10 11 4 5"></polyline>
+                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                  </svg>
+                  Connection Mode
+                </div>
+
+                <div class="mode-selector">
+                  <button type="button" class="mode-btn active" data-mode="terminal">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="4 17 10 11 4 5"></polyline>
+                      <line x1="12" y1="19" x2="20" y2="19"></line>
+                    </svg>
+                    Terminal
+                    <span class="mode-hint">Interactive SSH session</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="sftp">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    SFTP
+                    <span class="mode-hint">Interactive file browser</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="scp">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    SCP
+                    <span class="mode-hint">Copy files to/from host</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Section: SCP Transfer Options (SCP mode only) -->
+              <div id="scp-transfer-section" class="form-section hidden">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="16 16 12 12 8 16"></polyline>
+                    <line x1="12" y1="12" x2="12" y2="21"></line>
+                    <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                  </svg>
+                  File Transfer
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="conn-scp-direction">Direction</label>
+                    <div class="direction-selector">
+                      <button type="button" class="direction-btn active" data-direction="upload">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="16 16 12 12 8 16"></polyline>
+                          <line x1="12" y1="12" x2="12" y2="21"></line>
+                        </svg>
+                        Upload
+                      </button>
+                      <button type="button" class="direction-btn" data-direction="download">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="8 8 12 12 16 8"></polyline>
+                          <line x1="12" y1="3" x2="12" y2="12"></line>
+                        </svg>
+                        Download
+                      </button>
+                    </div>
+                    <input type="hidden" id="conn-scp-direction" value="upload">
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="conn-scp-local">Local Path</label>
+                    <div class="input-with-button">
+                      <input type="text" id="conn-scp-local" placeholder="/Users/you/files">
+                      <button type="button" id="btn-browse-local" class="btn btn-small btn-secondary">Browse</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="conn-scp-remote">Remote Path</label>
+                    <input type="text" id="conn-scp-remote" placeholder="/home/user/files">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Section: Common SSH Options (SSH only) -->
+              <div id="ssh-common-options" class="form-section">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Options
+                </div>
+
+                <div class="options-grid">
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-compression">
+                    <div class="option-card-content">
+                      <span class="option-label">Compression</span>
+                      <span class="option-flag">-C</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-verbose">
+                    <div class="option-card-content">
+                      <span class="option-label">Verbose</span>
+                      <span class="option-flag">-v</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-agent-forwarding">
+                    <div class="option-card-content">
+                      <span class="option-label">Agent Forwarding</span>
+                      <span class="option-flag">-A</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-x11-forwarding">
+                    <div class="option-card-content">
+                      <span class="option-label">X11 Forwarding</span>
+                      <span class="option-flag">-X</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-strict-host-off">
+                    <div class="option-card-content">
+                      <span class="option-label">Ignore Host Key</span>
+                      <span class="option-flag">StrictHostKeyChecking + KnownHosts</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-keep-alive">
+                    <div class="option-card-content">
+                      <span class="option-label">Keep Alive (60s)</span>
+                      <span class="option-flag">ServerAliveInterval=60</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-ipv4">
+                    <div class="option-card-content">
+                      <span class="option-label">Force IPv4</span>
+                      <span class="option-flag">-4</span>
+                    </div>
+                  </label>
+                  <label class="option-card">
+                    <input type="checkbox" id="opt-ipv6">
+                    <div class="option-card-content">
+                      <span class="option-label">Force IPv6</span>
+                      <span class="option-flag">-6</span>
+                    </div>
+                  </label>
+                  <label class="option-card scp-only-option hidden">
+                    <input type="checkbox" id="opt-scp-recursive">
+                    <div class="option-card-content">
+                      <span class="option-label">Recursive</span>
+                      <span class="option-flag">-r (SCP)</span>
+                    </div>
+                  </label>
+                  <label class="option-card scp-only-option hidden">
+                    <input type="checkbox" id="opt-scp-legacy">
+                    <div class="option-card-content">
+                      <span class="option-label">Legacy SCP Protocol</span>
+                      <span class="option-flag">-O (SCP)</span>
+                    </div>
+                  </label>
+                </div>
+
+                <div class="form-group" style="margin-top: 12px;">
+                  <label for="conn-extra-options">Additional Options</label>
+                  <input type="text" id="conn-extra-options" placeholder="e.g. -L 8080:localhost:80 -D 1080">
+                  <span class="form-hint">Any extra flags for the ssh/sftp/scp command</span>
+                </div>
+              </div>
+
+              <!-- Section: Telnet Options (Telnet only) -->
+              <div id="telnet-options-section" class="form-section hidden">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  Telnet Options
+                </div>
+                <div class="form-group">
+                  <label for="conn-telnet-options">Additional Options</label>
+                  <input type="text" id="conn-telnet-options" placeholder="-l username">
+                  <span class="form-hint">Extra flags passed to the telnet command</span>
+                </div>
+              </div>
+
+              <!-- Section: FTP Options (FTP only) -->
+              <div id="ftp-options-section" class="form-section hidden">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                  FTP Options
+                </div>
+                <div class="form-group">
+                  <label for="conn-ftp-options">Additional Options</label>
+                  <input type="text" id="conn-ftp-options" placeholder="-p">
+                  <span class="form-hint">Extra flags passed to the ftp command</span>
+                </div>
+              </div>
+
+              <!-- Serial Options -->
+              <div id="serial-options-section" class="form-section hidden">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="7" width="20" height="10" rx="2" ry="2"></rect>
+                    <line x1="16" y1="12" x2="16" y2="12.01"></line>
+                    <line x1="12" y1="12" x2="12" y2="12.01"></line>
+                    <line x1="8" y1="12" x2="8" y2="12.01"></line>
+                  </svg>
+                  Serial Settings
+                </div>
+                <div class="form-group">
+                  <label for="serial-port">Port</label>
+                  <div class="serial-port-row">
+                    <select id="serial-port"><option value="">Loading ports…</option></select>
+                    <button type="button" id="btn-refresh-ports" title="Refresh port list">&#x21BB;</button>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="serial-baud">Baud Rate</label>
+                    <select id="serial-baud">
+                      <option value="300">300</option>
+                      <option value="1200">1200</option>
+                      <option value="2400">2400</option>
+                      <option value="4800">4800</option>
+                      <option value="9600">9600</option>
+                      <option value="19200">19200</option>
+                      <option value="38400">38400</option>
+                      <option value="57600">57600</option>
+                      <option value="115200" selected>115200</option>
+                      <option value="230400">230400</option>
+                      <option value="460800">460800</option>
+                      <option value="921600">921600</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="serial-databits">Data Bits</label>
+                    <select id="serial-databits">
+                      <option value="5">5</option>
+                      <option value="6">6</option>
+                      <option value="7">7</option>
+                      <option value="8" selected>8</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="serial-stopbits">Stop Bits</label>
+                    <select id="serial-stopbits">
+                      <option value="1" selected>1</option>
+                      <option value="2">2</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="serial-parity">Parity</label>
+                    <select id="serial-parity">
+                      <option value="none" selected>None</option>
+                      <option value="odd">Odd</option>
+                      <option value="even">Even</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="serial-flow">Flow Control</label>
+                  <select id="serial-flow">
+                    <option value="none" selected>None</option>
+                    <option value="hardware">Hardware (RTS/CTS)</option>
+                    <option value="software">Software (XON/XOFF)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Section: Actions -->
+              <div class="form-section" id="actions-section">
+                <div class="form-section-header">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                  Actions
+                </div>
+                <div class="actions-body">
+                  <div class="actions-list" id="actions-list">
+                    <!-- .action-item rows rendered by JS -->
+                  </div>
+                  <div class="actions-toolbar">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-add-action">+ Add Action</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-import-actions">Import</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-export-actions">Export</button>
+                  </div>
+                </div>
+                <div class="action-editor hidden" id="action-editor">
+                  <div class="form-row">
+                    <div class="form-group flex-1">
+                      <label for="action-name-input">Name <span class="field-hint">(max 20 chars)</span></label>
+                      <input type="text" id="action-name-input" maxlength="20" placeholder="e.g. Show Interfaces">
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="action-script-input">Script</label>
+                    <textarea id="action-script-input" rows="5"
+                      placeholder="show interfaces&#10;show version&#10;(each line sent as a command)"></textarea>
+                  </div>
+                  <div class="action-editor-btns">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-action-cancel">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-action-save">Save Action</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Form Actions (Save / Connect) -->
+              <div class="form-actions">
+                <div class="form-actions-left">
+                  <button type="button" id="btn-delete-profile" class="btn btn-danger hidden">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Delete
+                  </button>
+                </div>
+                <div class="form-actions-right">
+                  <button type="button" id="btn-save-profile" class="btn btn-secondary">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                      <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                      <polyline points="7 3 7 8 15 8"></polyline>
+                    </svg>
+                    Save
+                  </button>
+                  <button type="submit" class="btn btn-primary btn-connect">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M5 12h14"></path>
+                      <path d="M12 5l7 7-7 7"></path>
+                    </svg>
+                    Connect
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content settings-modal-content">
+      <div class="modal-header">
+        <h2>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Settings
+        </h2>
+        <button class="modal-close" id="settings-modal-close">&times;</button>
+      </div>
+
+      <div class="settings-body">
+
+        <!-- Storage Location -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Connection Storage</h3>
+          <p class="settings-section-desc">
+            Choose where Prateek-Term stores your hosts file. Point it to Dropbox,
+            iCloud Drive, or any shared folder to sync across machines.
+          </p>
+          <div class="settings-path-row">
+            <input type="text" id="settings-profiles-path" class="settings-path-input" readonly
+                   placeholder="Default: ~/Library/Application Support/Prateek-Term/connection-profiles.json">
+            <button id="btn-choose-path" class="btn btn-secondary btn-sm">Browse…</button>
+          </div>
+          <p class="settings-path-note">
+            Existing hosts will be copied to the new location automatically.
+          </p>
+        </section>
+
+        <div class="settings-divider"></div>
+
+        <!-- Theme -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Colour Theme</h3>
+          <p class="settings-section-desc">
+            Applies instantly to the UI and all open terminals. Click a theme to preview.
+          </p>
+          <div id="theme-picker-grid" class="theme-picker-grid"></div>
+        </section>
+
+        <div class="settings-divider"></div>
+
+        <!-- Import -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Import</h3>
+          <p class="settings-section-desc">
+            Merge hosts from an external source into your current list.
+            Duplicate IDs are skipped.
+          </p>
+          <div class="settings-import-buttons">
+            <button id="btn-import-ssh" class="btn btn-secondary settings-io-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              SSH Config
+              <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
+            </button>
+            <button id="btn-import-json" class="btn btn-secondary settings-io-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              Prateek-Term JSON
+              <span class="settings-io-badge">Native backup</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="settings-divider"></div>
+
+        <!-- Export -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Export</h3>
+          <p class="settings-section-desc">
+            Save your hosts to a file. SSH Config can be opened directly by
+            Termius, Tabby, iTerm2, and any OpenSSH client.
+          </p>
+          <div class="settings-import-buttons">
+            <button id="btn-export-ssh" class="btn btn-secondary settings-io-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 16 12 21 17 16"></polyline>
+                <line x1="12" y1="21" x2="12" y2="9"></line>
+              </svg>
+              SSH Config
+              <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
+            </button>
+            <button id="btn-export-json" class="btn btn-secondary settings-io-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 16 12 21 17 16"></polyline>
+                <line x1="12" y1="21" x2="12" y2="9"></line>
+              </svg>
+              Prateek-Term JSON
+              <span class="settings-io-badge">Full backup</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="settings-divider"></div>
+
+        <!-- Debug Section -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            Debug &amp; Diagnostics
+          </h3>
+          <div class="settings-debug-toggle-row">
+            <label class="settings-toggle-label" for="toggle-debug-logging">
+              Enable debug logging
+              <span class="settings-toggle-hint">Logs app activity to a file. Share with the developer when reporting issues.</span>
+            </label>
+            <label class="settings-toggle">
+              <input type="checkbox" id="toggle-debug-logging">
+              <span class="settings-toggle-track"></span>
+            </label>
+          </div>
+          <div id="debug-log-panel" class="debug-log-panel hidden">
+            <div class="debug-log-toolbar">
+              <span id="debug-log-meta" class="debug-log-meta">No entries yet</span>
+              <div class="debug-log-actions">
+                <button id="btn-debug-refresh" class="btn btn-sm btn-secondary">Refresh</button>
+                <button id="btn-debug-copy" class="btn btn-sm btn-secondary">Copy All</button>
+                <button id="btn-debug-show-file" class="btn btn-sm btn-secondary">Show in Finder</button>
+                <button id="btn-debug-clear" class="btn btn-sm btn-danger">Clear</button>
+              </div>
+            </div>
+            <div id="debug-log-path" class="debug-log-path"></div>
+            <pre id="debug-log-content" class="debug-log-content">No log entries yet.</pre>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="settings-footer">
+        <span id="settings-status" class="settings-status"></span>
+        <div class="settings-footer-btns">
+          <button id="btn-settings-cancel" class="btn btn-secondary">Cancel</button>
+          <button id="btn-settings-save" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

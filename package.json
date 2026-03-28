@@ -1,0 +1,124 @@
+{
+  "name": "prateek-term",
+  "version": "1.0.0",
+  "description": "Prateek-Term - A macOS terminal emulator and SSH connection manager",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "electron-rebuild -f -w node-pty || echo 'electron-rebuild failed — run: export SDKROOT=$(xcrun --sdk macosx --show-sdk-path) && npm run rebuild'",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "lint": "eslint src/",
+    "test": "node tests/run.js all",
+    "test:unit": "node tests/run.js unit",
+    "test:renderer": "node tests/run.js renderer",
+    "test:ssh": "node tests/run.js ssh",
+    "test:watch": "node tests/run.js all --watch",
+    "test:coverage": "node tests/run.js all --coverage",
+    "prebuild": "git rev-list --count HEAD > .build-number",
+    "pack": "npm run prebuild && electron-builder --dir",
+    "dist": "npm run prebuild && electron-builder --mac",
+    "dist:arm64": "npm run prebuild && electron-builder --mac --arm64",
+    "dist:x64": "npm run prebuild && electron-builder --mac --x64"
+  },
+  "author": "Prateek",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0",
+    "serialport": "^12.0.0"
+  },
+  "build": {
+    "appId": "com.prateek.prateekterm",
+    "productName": "Prateek-Term",
+    "icon": "build/icon.icns",
+    "compression": "maximum",
+    "asar": true,
+    "generateUpdatesFilesForAllChannels": false,
+    "afterPack": "./build/afterPack.js",
+    "mac": {
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Folder",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.folder",
+              "public.directory"
+            ]
+          }
+        ]
+      },
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Prateek-Term ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "protocols": [
+      {
+        "name": "Prateek-Term",
+        "schemes": [
+          "prateekterm"
+        ],
+        "role": "Viewer"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "build/OpenInPrateekTerm.workflow",
+        "to": "OpenInPrateekTerm.workflow"
+      },
+      {
+        "from": ".build-number",
+        "to": ".build-number"
+      }
+    ],
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.map}",
+      "!node_modules/**/test{s,}/**",
+      "!node_modules/**/*.{ts,d.ts}"
+    ]
+  }
+}

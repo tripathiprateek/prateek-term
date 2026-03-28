@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prateek-Term — User Guide</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #1e1e2e;
+      --bg-surface:  #2a2a3e;
+      --bg-card:     #252538;
+      --border:      #3a3a5c;
+      --text:        #cdd6f4;
+      --text-muted:  #7f849c;
+      --accent:      #89b4fa;
+      --accent-2:    #a6e3a1;
+      --accent-3:    #f38ba8;
+      --accent-4:    #fab387;
+      --accent-5:    #cba6f7;
+      --radius:      14px;
+      --shadow:      0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+      line-height: 1.65;
+      font-size: 15px;
+    }
+
+    /* ── Layout ── */
+    .page-wrap { max-width: 940px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 72px 24px 56px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(137,180,250,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(137,180,250,0.15);
+      border: 1px solid rgba(137,180,250,0.3);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      font-size: 52px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #cdd6f4 0%, #89b4fa 50%, #cba6f7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      margin-top: 14px;
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      margin: 40px 0;
+    }
+    .toc h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+    .toc ol { list-style: none; counter-reset: toc; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 32px; }
+    .toc li { counter-increment: toc; display: flex; align-items: center; gap: 8px; }
+    .toc li::before {
+      content: counter(toc, decimal-leading-zero);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      min-width: 22px;
+    }
+    .toc a { color: var(--text); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+    .toc a:hover { color: var(--accent); }
+
+    /* ── Section ── */
+    .section { margin-top: 72px; }
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .section h2 {
+      font-size: 32px;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+    .section-intro {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin-bottom: 32px;
+    }
+
+    /* ── Feature Card ── */
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 28px;
+    }
+    .feature-card + .feature-card { margin-top: 0; }
+
+    .feature-demo {
+      background: #13131f;
+      border-bottom: 1px solid var(--border);
+      padding: 28px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .feature-desc {
+      padding: 20px 24px;
+    }
+    .feature-desc h3 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+    .feature-desc p  { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* ── Steps ── */
+    .steps { margin-top: 14px; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .steps li {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; color: var(--text-muted);
+    }
+    .steps li .step-num {
+      flex-shrink: 0;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: rgba(137,180,250,0.15);
+      border: 1px solid rgba(137,180,250,0.3);
+      color: var(--accent);
+      font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: 1px;
+    }
+
+    /* ── Kbd ── */
+    kbd {
+      display: inline-block;
+      padding: 2px 7px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 5px;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text);
+    }
+
+    /* ── Badge ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .badge-ssh    { background: rgba(137,180,250,0.2);  color: #89b4fa; }
+    .badge-serial { background: rgba(166,227,161,0.2);  color: #a6e3a1; }
+    .badge-telnet { background: rgba(203,166,247,0.2);  color: #cba6f7; }
+    .badge-local  { background: rgba(249,226,175,0.2);  color: #f9e2af; }
+    .badge-sftp   { background: rgba(250,179,135,0.2);  color: #fab387; }
+
+    /* ── Tip box ── */
+    .tip {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: rgba(137,180,250,0.08);
+      border: 1px solid rgba(137,180,250,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      font-size: 13px;
+    }
+    .tip-icon { font-size: 18px; flex-shrink: 0; }
+    .tip p { color: var(--text-muted); line-height: 1.5; }
+    .tip strong { color: var(--text); }
+
+    /* ══════════════════════════════════════════
+       ANIMATED MOCK-UPS
+    ══════════════════════════════════════════ */
+
+    /* ── Window chrome ── */
+    .mock-window {
+      width: 100%;
+      max-width: 620px;
+      background: #1e1e2e;
+      border-radius: 12px;
+      border: 1px solid #3a3a5c;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+      overflow: hidden;
+      font-size: 13px;
+    }
+    .mock-titlebar {
+      background: #252538;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 6px;
+      border-bottom: 1px solid #3a3a5c;
+    }
+    .mock-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+    }
+    .mock-dot.red    { background: #f38ba8; }
+    .mock-dot.yellow { background: #f9e2af; }
+    .mock-dot.green  { background: #a6e3a1; }
+    .mock-title {
+      flex: 1; text-align: center;
+      font-size: 12px; color: #7f849c;
+      font-weight: 600;
+    }
+
+    /* ── Tab bar ── */
+    .mock-tabs {
+      background: #1a1a2e;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 4px;
+      border-bottom: 1px solid #3a3a5c;
+      overflow: hidden;
+    }
+    .mock-tab {
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #7f849c;
+      background: transparent;
+      white-space: nowrap;
+    }
+    .mock-tab.active {
+      background: #252538;
+      color: #cdd6f4;
+    }
+    .mock-tab-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .mock-tab-badge.ssh    { background: rgba(137,180,250,0.2); color: #89b4fa; }
+    .mock-tab-badge.local  { background: rgba(249,226,175,0.2); color: #f9e2af; }
+    .mock-tab-badge.serial { background: rgba(166,227,161,0.2); color: #a6e3a1; }
+
+    /* ── Terminal body ── */
+    .mock-terminal {
+      background: #13131f;
+      padding: 14px 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      color: #cdd6f4;
+      min-height: 120px;
+      line-height: 1.7;
+    }
+    .mock-prompt { color: #a6e3a1; }
+    .mock-cmd    { color: #89b4fa; }
+    .mock-out    { color: #7f849c; }
+
+    /* ── Sidebar + Form ── */
+    .mock-layout {
+      display: flex;
+      min-height: 260px;
+    }
+    .mock-sidebar {
+      width: 170px;
+      background: #1a1a2e;
+      border-right: 1px solid #3a3a5c;
+      padding: 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .mock-profile-item {
+      padding: 8px 10px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #7f849c;
+      cursor: pointer;
+    }
+    .mock-profile-item.selected {
+      background: rgba(137,180,250,0.1);
+      color: #cdd6f4;
+    }
+    .mock-profile-icon {
+      width: 22px; height: 22px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+    }
+    .mock-profile-icon.ssh    { background: rgba(137,180,250,0.2); }
+    .mock-profile-icon.serial { background: rgba(166,227,161,0.2); }
+    .mock-profile-icon.local  { background: rgba(249,226,175,0.2); }
+    .mock-form {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .mock-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mock-label {
+      font-size: 10px;
+      color: #7f849c;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .mock-input {
+      background: #252538;
+      border: 1px solid #3a3a5c;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #cdd6f4;
+    }
+    .mock-input.focused { border-color: #89b4fa; }
+    .mock-btn {
+      padding: 6px 14px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      border: none;
+    }
+    .mock-btn.primary { background: #89b4fa; color: #1e1e2e; }
+    .mock-btn.secondary { background: #252538; border: 1px solid #3a3a5c; color: #cdd6f4; }
+    .mock-btn-row { display: flex; gap: 6px; margin-top: 4px; }
+    .mock-row { display: flex; gap: 8px; }
+
+    /* ── Context menu ── */
+    .mock-ctx-menu {
+      background: #252538;
+      border: 1px solid #3a3a5c;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      padding: 4px;
+      min-width: 160px;
+    }
+    .mock-ctx-item {
+      padding: 7px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      color: #cdd6f4;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .mock-ctx-item:hover, .mock-ctx-item.active {
+      background: rgba(137,180,250,0.15);
+      color: #89b4fa;
+    }
+    .mock-ctx-divider { height: 1px; background: #3a3a5c; margin: 3px 0; }
+    .mock-ctx-shortcut { font-size: 10px; color: #7f849c; }
+    .mock-ctx-arrow { font-size: 10px; color: #7f849c; }
+
+    /* ── Tags ── */
+    .mock-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .mock-tag-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+    /* ── Actions list ── */
+    .mock-actions-list { display: flex; flex-direction: column; gap: 4px; }
+    .mock-action-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px;
+      background: #252538;
+      border: 1px solid #3a3a5c;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #cdd6f4;
+    }
+    .mock-action-name { flex: 1; }
+    .mock-action-btn {
+      font-size: 11px;
+      color: #7f849c;
+      cursor: pointer;
+    }
+
+    /* ══════════════════════════════════════════
+       ANIMATIONS — keyframes
+    ══════════════════════════════════════════ */
+
+    /* Fade-up entrance */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Blink cursor */
+    @keyframes blink {
+      0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; }
+    }
+
+    /* Typing text reveal */
+    @keyframes typeIn {
+      from { width: 0; } to { width: 100%; }
+    }
+
+    /* Slide-in from right */
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Slide-in from left */
+    @keyframes slideInLeft {
+      from { opacity: 0; transform: translateX(-20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Pop-in scale */
+    @keyframes popIn {
+      0%   { opacity: 0; transform: scale(0.85); }
+      70%  { transform: scale(1.03); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    /* Pulse highlight */
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(137,180,250,0); }
+      50%       { box-shadow: 0 0 0 4px rgba(137,180,250,0.25); }
+    }
+
+    /* Highlight a field */
+    @keyframes highlightField {
+      0%, 100% { border-color: #3a3a5c; }
+      40%, 60% { border-color: #89b4fa; box-shadow: 0 0 0 3px rgba(137,180,250,0.2); }
+    }
+
+    /* Tab appear */
+    @keyframes tabAppear {
+      from { opacity: 0; transform: scale(0.9) translateY(-4px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* Context menu drop */
+    @keyframes menuDrop {
+      from { opacity: 0; transform: scale(0.92) translateY(-6px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* Submenu slide */
+    @keyframes submenuSlide {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Shimmer for tag color */
+    @keyframes shimmer {
+      0%   { background-position: -200px 0; }
+      100% { background-position: 200px 0; }
+    }
+
+    /* Float up and fade (status message) */
+    @keyframes statusFloat {
+      0%   { opacity: 0; transform: translateY(8px); }
+      20%  { opacity: 1; transform: translateY(0); }
+      80%  { opacity: 1; }
+      100% { opacity: 0; transform: translateY(-8px); }
+    }
+
+    /* ══════════════════════════════════════════
+       DEMO-SPECIFIC STYLES
+    ══════════════════════════════════════════ */
+
+    /* 1 — Tabs demo */
+    .demo-tabs .mock-tab.anim-tab-new {
+      animation: tabAppear 0.4s cubic-bezier(0.34,1.56,0.64,1) 1.2s both;
+    }
+    .demo-tabs .mock-terminal .line-1 { animation: fadeUp 0.4s 0.5s both; }
+    .demo-tabs .mock-terminal .line-2 { animation: fadeUp 0.4s 0.9s both; }
+    .demo-tabs .mock-terminal .line-3 { animation: fadeUp 0.4s 1.3s both; }
+    .cursor { display: inline-block; width: 7px; height: 13px; background: #89b4fa; animation: blink 1s infinite; vertical-align: -2px; margin-left: 2px; }
+
+    /* 2 — New device form */
+    .demo-newdevice .mock-input.anim-host { animation: highlightField 1.6s 1s ease-in-out both; }
+    .demo-newdevice .mock-input.anim-user { animation: highlightField 1.6s 1.8s ease-in-out both; }
+    .demo-newdevice .mock-profile-item.anim-appear { animation: slideInLeft 0.4s 0.5s both; }
+    .demo-newdevice .mock-btn.anim-save { animation: pulseGlow 1.5s 3s infinite; }
+
+    /* 3 — SSH device */
+    .demo-ssh .mock-input.anim-h1 { animation: highlightField 1.4s 0.6s both; }
+    .demo-ssh .mock-input.anim-h2 { animation: highlightField 1.4s 1.4s both; }
+    .demo-ssh .demo-ssh-badge { animation: popIn 0.5s 2.4s both; }
+
+    /* 4 — Serial device */
+    .demo-serial .mock-input.anim-port { animation: highlightField 1.6s 0.8s both; }
+    .demo-serial .demo-serial-badge { animation: popIn 0.5s 1.8s both; }
+    .demo-serial .mock-terminal .line-1 { animation: fadeUp 0.4s 2.2s both; }
+
+    /* 5 — Tags */
+    .demo-tags .tag-anim-1 { animation: popIn 0.45s 0.5s both; }
+    .demo-tags .tag-anim-2 { animation: popIn 0.45s 0.9s both; }
+    .demo-tags .tag-anim-3 { animation: popIn 0.45s 1.3s both; }
+    .demo-tags .mock-profile-item.anim-tag-item { animation: slideInLeft 0.4s 1.8s both; }
+
+    /* 6 — Actions */
+    .demo-actions .action-anim-1 { animation: slideInRight 0.4s 0.6s both; }
+    .demo-actions .action-anim-2 { animation: slideInRight 0.4s 1.0s both; }
+    .demo-actions .action-anim-3 { animation: slideInRight 0.4s 1.4s both; }
+
+    /* 7 — Context menu / Run action */
+    .demo-run-action .mock-ctx-menu { animation: menuDrop 0.35s 0.8s cubic-bezier(0.34,1.2,0.64,1) both; }
+    .demo-run-action .mock-ctx-submenu { animation: submenuSlide 0.3s 1.4s both; }
+    .demo-run-action .mock-terminal .line-result { animation: fadeUp 0.5s 2.2s both; }
+
+    /* 8 — Add selection as action */
+    .demo-sel-action .sel-highlight {
+      background: rgba(137,180,250,0.2);
+      border-radius: 3px;
+      animation: pulseGlow 1.8s 0.5s infinite;
+    }
+    .demo-sel-action .mini-dialog { animation: popIn 0.4s 1.4s cubic-bezier(0.34,1.3,0.64,1) both; }
+
+    /* 9 — Import/Export */
+    .demo-import-export .export-btn { animation: pulseGlow 1.8s 0.8s infinite; }
+    .demo-import-export .status-msg { animation: statusFloat 2.5s 1.8s both; }
+
+    /* 10 — Settings */
+    .demo-settings .settings-card { animation: fadeUp 0.5s 0.4s both; }
+    .demo-settings .theme-swatch-active { animation: pulseGlow 1.8s 1.2s infinite; }
+
+    /* ── Settings card mock ── */
+    .mock-settings-card {
+      background: #252538;
+      border: 1px solid #3a3a5c;
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 320px;
+    }
+    .mock-settings-row {
+      display: flex; align-items: center; gap: 10px; justify-content: space-between;
+    }
+    .mock-settings-label { font-size: 12px; color: #cdd6f4; }
+    .mock-settings-value { font-size: 12px; color: #7f849c; }
+    .mock-toggle {
+      width: 32px; height: 18px; border-radius: 9px;
+      display: flex; align-items: center; padding: 2px;
+      cursor: pointer;
+    }
+    .mock-toggle.on  { background: #89b4fa; justify-content: flex-end; }
+    .mock-toggle.off { background: #3a3a5c; justify-content: flex-start; }
+    .mock-toggle::after { content: ''; width: 14px; height: 14px; border-radius: 50%; background: white; }
+
+    .mock-theme-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .mock-theme-swatch {
+      width: 28px; height: 28px; border-radius: 7px;
+      border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .mock-theme-swatch.active { border-color: #89b4fa; }
+
+    /* ── Import/export section ── */
+    .mock-import-export-row {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    .mock-status {
+      font-size: 11px;
+      color: #a6e3a1;
+      background: rgba(166,227,161,0.1);
+      border: 1px solid rgba(166,227,161,0.2);
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    /* ── Mini dialog ── */
+    .mock-mini-dialog {
+      background: #252538;
+      border: 1px solid #3a3a5c;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      padding: 12px;
+      width: 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .mock-mini-title { font-size: 10px; font-weight: 700; color: #7f849c; text-transform: uppercase; letter-spacing: 0.07em; }
+    .mock-mini-input {
+      background: #1e1e2e;
+      border: 1px solid #3a3a5c;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      color: #cdd6f4;
+    }
+    .mock-mini-script {
+      background: #1e1e2e;
+      border: 1px solid #3a3a5c;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: #7f849c;
+      font-family: 'SF Mono', monospace;
+    }
+
+    /* ── Grid layouts for some demos ── */
+    .demo-side-by-side {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    /* ── Section divider ── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      margin: 60px 0 0;
+    }
+
+    /* ── Two-col grid for feature cards ── */
+    .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 640px) { .feature-grid { grid-template-columns: 1fr; } .toc ol { grid-template-columns: 1fr; } }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 80px;
+      border-top: 1px solid var(--border);
+      padding-top: 32px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<!-- ╔══════════════════════════════╗ -->
+<!-- ║         HERO                 ║ -->
+<!-- ╚══════════════════════════════╝ -->
+<div class="page-wrap">
+  <div class="hero">
+    <div class="hero-badge">User Guide · v1.0</div>
+    <h1>Prateek-Term</h1>
+    <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
+  </div>
+
+  <!-- ── Table of Contents ── -->
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#tabs">Tabs &amp; Local Terminals</a></li>
+      <li><a href="#new-device">Adding a New Device</a></li>
+      <li><a href="#ssh">SSH Connections</a></li>
+      <li><a href="#serial">Serial / COM Devices</a></li>
+      <li><a href="#tags">Tags &amp; Filtering</a></li>
+      <li><a href="#actions">Actions per Profile</a></li>
+      <li><a href="#run-action">Running Actions</a></li>
+      <li><a href="#sel-action">Add Selection as Action</a></li>
+      <li><a href="#import-export">Import &amp; Export</a></li>
+      <li><a href="#settings">Settings &amp; Themes</a></li>
+    </ol>
+  </nav>
+
+  <!-- ════════════════════════════════════════════
+       1 — TABS & LOCAL TERMINALS
+  ════════════════════════════════════════════ -->
+  <div class="section" id="tabs">
+    <div class="section-label">01</div>
+    <h2>Tabs &amp; Local Terminals</h2>
+    <p class="section-intro">Open multiple terminal sessions side-by-side in tabs. Each tab runs an independent PTY process. Local tabs start immediately — no configuration needed.</p>
+
+    <div class="feature-card demo-tabs">
+      <div class="feature-demo">
+        <div class="mock-window">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div>
+            <div class="mock-dot yellow"></div>
+            <div class="mock-dot green"></div>
+            <div class="mock-title">Prateek-Term</div>
+          </div>
+          <div class="mock-tabs">
+            <div class="mock-tab active">
+              <span class="mock-tab-badge local">LOCAL</span> dist
+            </div>
+            <div class="mock-tab anim-tab-new">
+              <span class="mock-tab-badge ssh">SSH</span> router-01
+            </div>
+          </div>
+          <div class="mock-terminal">
+            <div class="line-1"><span class="mock-prompt">~/projects</span> $ <span class="mock-cmd">ls -la</span></div>
+            <div class="line-2"><span class="mock-out">drwxr-xr-x  8 prateek staff   256 Mar 27 09:12 .</span></div>
+            <div class="line-3"><span class="mock-prompt">~/projects</span> $ <span class="cursor"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Multi-tab workflow</h3>
+        <p>Every tab is a full PTY — resize, scroll, paste, and log independently.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Press <kbd>⌘T</kbd> to open a new local terminal tab.</li>
+          <li><span class="step-num">2</span>Click any tab to switch; the terminal resizes to fit automatically.</li>
+          <li><span class="step-num">3</span>Middle-click a tab to close it.</li>
+          <li><span class="step-num">4</span>Drag tabs to reorder them.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       2 — ADDING A NEW DEVICE
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="new-device">
+    <div class="section-label">02</div>
+    <h2>Adding a New Device</h2>
+    <p class="section-intro">Open the Connection Manager (<kbd>⌘K</kbd>) to add, edit, and organise all your saved connections.</p>
+
+    <div class="feature-card demo-newdevice">
+      <div class="feature-demo">
+        <div class="mock-window" style="max-width:580px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Connection Manager</div>
+          </div>
+          <div class="mock-layout">
+            <div class="mock-sidebar">
+              <div class="mock-profile-item anim-appear">
+                <div class="mock-profile-icon ssh">🖥</div> router-01
+              </div>
+              <div class="mock-profile-item selected anim-appear" style="animation-delay:0.8s">
+                <div class="mock-profile-icon ssh">🖥</div> prod-server
+              </div>
+              <div class="mock-profile-item anim-appear" style="animation-delay:1.1s">
+                <div class="mock-profile-icon serial">⚙</div> lantronix
+              </div>
+            </div>
+            <div class="mock-form">
+              <div class="mock-row">
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Protocol</div>
+                  <div class="mock-input">SSH</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Label</div>
+                  <div class="mock-input anim-host">prod-server</div>
+                </div>
+              </div>
+              <div class="mock-field">
+                <div class="mock-label">Hostname / IP</div>
+                <div class="mock-input anim-user">192.168.1.50</div>
+              </div>
+              <div class="mock-field">
+                <div class="mock-label">Username</div>
+                <div class="mock-input">admin</div>
+              </div>
+              <div class="mock-btn-row">
+                <div class="mock-btn secondary">Delete</div>
+                <div style="flex:1"></div>
+                <div class="mock-btn primary anim-save">💾 Save</div>
+                <div class="mock-btn primary" style="background:#a6e3a1">▶ Connect</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Connection Manager — <kbd>⌘K</kbd></h3>
+        <p>All saved devices listed in the sidebar. Click any profile to load it into the form, edit fields, and save.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Press <kbd>⌘K</kbd> or click the grid icon in the title bar.</li>
+          <li><span class="step-num">2</span>Click <strong>+ New</strong> at the top of the sidebar to start a fresh form.</li>
+          <li><span class="step-num">3</span>Fill in Protocol, Label, Host, Username, and Auth method.</li>
+          <li><span class="step-num">4</span>Click <strong>Save</strong> to persist, or <strong>Connect</strong> to save &amp; open a terminal immediately.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       3 — SSH CONNECTIONS
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="ssh">
+    <div class="section-label">03</div>
+    <h2>SSH Connections</h2>
+    <p class="section-intro">Full SSH terminal, SFTP browser, and SCP file transfer — all in one profile. Use password auth, identity files, or pasted PEM keys.</p>
+
+    <div class="feature-grid">
+      <div class="feature-card demo-ssh">
+        <div class="feature-demo" style="min-height:180px; flex-direction:column; gap:12px;">
+          <div class="mock-window">
+            <div class="mock-titlebar">
+              <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+              <div class="mock-title">SSH Profile</div>
+            </div>
+            <div class="mock-form" style="padding:12px; gap:8px;">
+              <div class="mock-row">
+                <div class="mock-field" style="flex:2">
+                  <div class="mock-label">Host</div>
+                  <div class="mock-input anim-h1">10.0.0.1</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Port</div>
+                  <div class="mock-input">22</div>
+                </div>
+              </div>
+              <div class="mock-field">
+                <div class="mock-label">Auth</div>
+                <div class="mock-input anim-h2">Identity File (.pem)</div>
+              </div>
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                <span class="mock-tab-badge ssh demo-ssh-badge" style="font-size:11px; padding:3px 8px;">SSH Terminal</span>
+                <span class="mock-tab-badge" style="background:rgba(203,166,247,0.2);color:#cba6f7; font-size:11px; padding:3px 8px;">SFTP</span>
+                <span class="mock-tab-badge" style="background:rgba(250,179,135,0.2);color:#fab387; font-size:11px; padding:3px 8px;">SCP</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-desc">
+          <h3>SSH modes</h3>
+          <p>Switch between <strong>Terminal</strong>, <strong>SFTP</strong> (file browser), and <strong>SCP</strong> (drag-and-drop upload/download) in the same profile.</p>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-demo" style="min-height:180px; flex-direction:column; gap:10px;">
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center;">
+            <div style="background:#252538; border:1px solid #3a3a5c; border-radius:8px; padding:10px 14px; font-size:12px; color:#7f849c;">
+              <div style="color:#cdd6f4; font-weight:600; margin-bottom:4px;">Advanced SSH options</div>
+              <div>✓ Agent forwarding</div>
+              <div>✓ X11 forwarding</div>
+              <div>✓ Keepalive</div>
+              <div>✓ Compression</div>
+              <div>✓ Strict host key off</div>
+              <div>✓ IPv4 / IPv6 force</div>
+              <div>✓ Extra SSH options</div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-desc">
+          <h3>Advanced SSH flags</h3>
+          <p>Toggle common SSH flags directly in the UI. Add raw SSH options for anything else — they're passed straight to the <code>ssh</code> binary.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="tip">
+      <span class="tip-icon">💡</span>
+      <p><strong>Drag-and-drop SCP upload:</strong> while connected via SSH, drag files from Finder onto the terminal window. Prateek-Term detects the remote working directory and uploads automatically.</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       4 — SERIAL / COM DEVICES
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="serial">
+    <div class="section-label">04</div>
+    <h2>Serial / COM Devices</h2>
+    <p class="section-intro">Connect to embedded systems, network switches, Arduino, and other serial devices with full control over baud rate, parity, and flow control.</p>
+
+    <div class="feature-card demo-serial">
+      <div class="feature-demo">
+        <div class="mock-window" style="max-width:540px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Serial Device</div>
+          </div>
+          <div class="mock-layout">
+            <div class="mock-form" style="padding:14px; gap:8px;">
+              <div class="mock-row">
+                <div class="mock-field" style="flex:2">
+                  <div class="mock-label">Port</div>
+                  <div class="mock-input anim-port">/dev/tty.usbserial-0001</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Baud Rate</div>
+                  <div class="mock-input">115200</div>
+                </div>
+              </div>
+              <div class="mock-row">
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Data Bits</div>
+                  <div class="mock-input">8</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Stop Bits</div>
+                  <div class="mock-input">1</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Parity</div>
+                  <div class="mock-input">None</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="mock-tab-badge serial demo-serial-badge" style="font-size:11px; padding:3px 8px;">SERIAL</span>
+                <span style="font-size:11px; color:#7f849c;">tty.usbserial @ 115200</span>
+              </div>
+              <div class="mock-terminal" style="min-height:60px; border-radius:7px; margin-top:4px;">
+                <div class="line-1"><span class="mock-out">Router> </span><span class="cursor"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Serial console</h3>
+        <p>Prateek-Term auto-discovers all available serial ports on your Mac. Pick a port, set the baud rate, and connect — the terminal opens instantly.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Set Protocol → <strong>Serial</strong> in the connection form.</li>
+          <li><span class="step-num">2</span>Choose your port from the dropdown — refreshed on every form open.</li>
+          <li><span class="step-num">3</span>Set baud rate (default 115200), data bits, parity, and flow control.</li>
+          <li><span class="step-num">4</span>Click <strong>Connect</strong> — a serial tab opens with the device prompt.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       5 — TAGS & FILTERING
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="tags">
+    <div class="section-label">05</div>
+    <h2>Tags &amp; Filtering</h2>
+    <p class="section-intro">Assign coloured tags to profiles to group and filter your devices — perfect for separating production, staging, and dev environments.</p>
+
+    <div class="feature-card demo-tags">
+      <div class="feature-demo" style="gap:24px; flex-wrap:wrap;">
+        <!-- Tags being added -->
+        <div style="display:flex; flex-direction:column; gap:10px; align-items:flex-start;">
+          <div style="font-size:11px; color:#7f849c; margin-bottom:2px;">Profile tags</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <div class="mock-tag tag-anim-1" style="background:rgba(243,139,168,0.15); color:#f38ba8;">
+              <div class="mock-tag-dot" style="background:#f38ba8;"></div> production
+            </div>
+            <div class="mock-tag tag-anim-2" style="background:rgba(250,179,135,0.15); color:#fab387;">
+              <div class="mock-tag-dot" style="background:#fab387;"></div> vpn
+            </div>
+            <div class="mock-tag tag-anim-3" style="background:rgba(166,227,161,0.15); color:#a6e3a1;">
+              <div class="mock-tag-dot" style="background:#a6e3a1;"></div> staging
+            </div>
+          </div>
+        </div>
+        <!-- Sidebar filtered -->
+        <div class="mock-sidebar" style="width:160px; border-radius:10px; border:1px solid #3a3a5c;">
+          <div style="font-size:10px; color:#7f849c; padding:4px 2px; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.06em; font-weight:700;">Filtered: production</div>
+          <div class="mock-profile-item anim-tag-item selected">
+            <div class="mock-profile-icon ssh">🖥</div> prod-db
+          </div>
+          <div class="mock-profile-item anim-tag-item" style="animation-delay:2s;">
+            <div class="mock-profile-icon ssh">🖥</div> prod-api
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Colour-coded tags</h3>
+        <p>Tags appear as coloured dots on profile list items. Click a tag in the sidebar filter strip to instantly narrow the profile list to only tagged devices.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Open a profile → find the <strong>Tags</strong> section.</li>
+          <li><span class="step-num">2</span>Type a tag name and pick a colour — press Enter to add.</li>
+          <li><span class="step-num">3</span>In the sidebar, click any tag pill to filter the profile list.</li>
+          <li><span class="step-num">4</span>Click the tag again or choose "All" to clear the filter.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       6 — ACTIONS PER PROFILE
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="actions">
+    <div class="section-label">06</div>
+    <h2>Actions per Profile</h2>
+    <p class="section-intro">Pre-define named scripts for each device. Run them instantly from the right-click context menu — no typing required.</p>
+
+    <div class="feature-card demo-actions">
+      <div class="feature-demo">
+        <div class="mock-window" style="max-width:460px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Actions — router-01</div>
+          </div>
+          <div class="mock-form" style="padding:14px; gap:10px;">
+            <div style="display:flex; gap:6px; margin-bottom:4px;">
+              <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px;">+ Add Action</div>
+              <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px;">Import</div>
+              <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px;">Export</div>
+            </div>
+            <div class="mock-actions-list">
+              <div class="mock-action-item action-anim-1">
+                <div class="mock-action-name">Show Interfaces</div>
+                <div class="mock-action-btn">✎</div>
+                <div class="mock-action-btn">✕</div>
+              </div>
+              <div class="mock-action-item action-anim-2">
+                <div class="mock-action-name">Ping 8.8.8.8</div>
+                <div class="mock-action-btn">✎</div>
+                <div class="mock-action-btn">✕</div>
+              </div>
+              <div class="mock-action-item action-anim-3">
+                <div class="mock-action-name">Show Running Cfg</div>
+                <div class="mock-action-btn">✎</div>
+                <div class="mock-action-btn">✕</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Define actions in the profile form</h3>
+        <p>Each action has a short name (max 20 chars) and a script. The script can be multi-line — it's sent as a single bracketed-paste block so multi-step commands work correctly.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Open a profile → scroll to the <strong>Actions</strong> section.</li>
+          <li><span class="step-num">2</span>Click <strong>+ Add Action</strong> → enter name and script → Save Action.</li>
+          <li><span class="step-num">3</span>Reorder via edit (✎) or remove with ✕.</li>
+          <li><span class="step-num">4</span>Save the profile — actions are available immediately in open terminals.</li>
+        </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">📤</span>
+          <p><strong>Import / Export</strong> — share your action library across profiles without exporting credentials. The exported JSON contains only <code>name</code> and <code>script</code> fields.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       7 — RUNNING ACTIONS
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="run-action">
+    <div class="section-label">07</div>
+    <h2>Running Actions from the Terminal</h2>
+    <p class="section-intro">Right-click anywhere in the terminal to see the context menu. If the connected profile has actions, an <strong>Actions</strong> item appears with a submenu.</p>
+
+    <div class="feature-card demo-run-action">
+      <div class="feature-demo" style="gap:24px; align-items:flex-start;">
+        <!-- Terminal snippet -->
+        <div class="mock-window" style="max-width:260px;">
+          <div class="mock-tabs">
+            <div class="mock-tab active"><span class="mock-tab-badge ssh">SSH</span> router-01</div>
+          </div>
+          <div class="mock-terminal" style="min-height:100px;">
+            <div><span class="mock-prompt">router#</span> <span class="cursor"></span></div>
+            <div class="line-result" style="margin-top:8px;"><span class="mock-out">GigabitEthernet0/0 is up, line protocol is up</span></div>
+          </div>
+        </div>
+        <!-- Context menu + submenu -->
+        <div style="display:flex; align-items:flex-start; gap:2px; padding-top:10px;">
+          <div class="mock-ctx-menu">
+            <div class="mock-ctx-item">Copy <span class="mock-ctx-shortcut">⌘C</span></div>
+            <div class="mock-ctx-item">Paste <span class="mock-ctx-shortcut">⌘V</span></div>
+            <div class="mock-ctx-item active">Actions <span class="mock-ctx-arrow">▶</span></div>
+            <div class="mock-ctx-divider"></div>
+            <div class="mock-ctx-item">Start Logging</div>
+          </div>
+          <div class="mock-ctx-submenu mock-ctx-menu" style="margin-left:2px;">
+            <div class="mock-ctx-item">Show Interfaces</div>
+            <div class="mock-ctx-item">Ping 8.8.8.8</div>
+            <div class="mock-ctx-item">Show Running Cfg</div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>One-click command execution</h3>
+        <p>Hover over <strong>Actions</strong> in the context menu to reveal the submenu. Click any action — the script is sent to the terminal immediately via bracketed paste.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Right-click anywhere inside the terminal pane.</li>
+          <li><span class="step-num">2</span>Hover over <strong>Actions</strong> to open the submenu.</li>
+          <li><span class="step-num">3</span>Click the action name — the script executes in the active shell.</li>
+        </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">🔄</span>
+          <p><strong>Live sync:</strong> if you add or edit an action while a terminal tab is open, the context menu updates immediately — no need to reconnect.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       8 — ADD SELECTION AS ACTION
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="sel-action">
+    <div class="section-label">08</div>
+    <h2>Add Selection as Action</h2>
+    <p class="section-intro">Select any text in the terminal — a command you just typed, a script output — and save it as a named action directly from the context menu.</p>
+
+    <div class="feature-card demo-sel-action">
+      <div class="feature-demo" style="gap:20px; flex-wrap:wrap; align-items:flex-start;">
+        <!-- Terminal with selection -->
+        <div class="mock-window" style="max-width:240px;">
+          <div class="mock-tabs">
+            <div class="mock-tab active"><span class="mock-tab-badge ssh">SSH</span> router-01</div>
+          </div>
+          <div class="mock-terminal" style="min-height:80px;">
+            <div><span class="mock-prompt">router#</span></div>
+            <div style="margin-top:4px;"><span class="sel-highlight">show ip interface brief</span></div>
+          </div>
+        </div>
+        <!-- Context menu (trimmed) -->
+        <div style="display:flex; gap:10px; align-items:flex-start; padding-top:8px;">
+          <div class="mock-ctx-menu">
+            <div class="mock-ctx-item">Copy <span class="mock-ctx-shortcut">⌘C</span></div>
+            <div class="mock-ctx-item">Paste <span class="mock-ctx-shortcut">⌘V</span></div>
+            <div class="mock-ctx-item active">Add as Action…</div>
+          </div>
+          <!-- Mini dialog -->
+          <div class="mock-mini-dialog mini-dialog" style="margin-top:30px;">
+            <div class="mock-mini-title">Save as Action</div>
+            <div class="mock-mini-input">IP Interfaces</div>
+            <div class="mock-mini-script">show ip interface brief</div>
+            <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:4px;">
+              <div class="mock-btn secondary" style="font-size:11px; padding:3px 10px;">Cancel</div>
+              <div class="mock-btn primary" style="font-size:11px; padding:3px 10px;">Save</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Capture &amp; save in seconds</h3>
+        <p>Great for turning one-off commands into reusable actions without leaving the terminal.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Select text in the terminal (click-drag or double-click a word).</li>
+          <li><span class="step-num">2</span>Right-click → <strong>Add as Action…</strong></li>
+          <li><span class="step-num">3</span>Enter a short name (max 20 chars) in the mini-dialog → <strong>Save</strong>.</li>
+          <li><span class="step-num">4</span>The action is added to the profile and saved to disk immediately.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       9 — IMPORT & EXPORT
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="import-export">
+    <div class="section-label">09</div>
+    <h2>Import &amp; Export</h2>
+    <p class="section-intro">Migrate from other SSH managers, back up your profiles, or share action libraries — Prateek-Term supports both SSH Config format and its own JSON format.</p>
+
+    <div class="feature-grid">
+      <!-- Profile import/export -->
+      <div class="feature-card demo-import-export">
+        <div class="feature-demo" style="min-height:180px; flex-direction:column; gap:16px;">
+          <div>
+            <div style="font-size:11px; color:#7f849c; margin-bottom:8px;">Profile backup</div>
+            <div class="mock-import-export-row">
+              <div class="mock-btn secondary export-btn" style="font-size:12px;">📥 SSH Config</div>
+              <div class="mock-btn secondary" style="font-size:12px;">📥 JSON</div>
+            </div>
+            <div style="font-size:10px; color:#7f849c; margin-top:4px;">Termius · Tabby · OpenSSH</div>
+          </div>
+          <div>
+            <div style="font-size:11px; color:#7f849c; margin-bottom:8px;">Export</div>
+            <div class="mock-import-export-row">
+              <div class="mock-btn secondary" style="font-size:12px;">📤 SSH Config</div>
+              <div class="mock-btn secondary" style="font-size:12px;">📤 JSON</div>
+            </div>
+          </div>
+          <div class="mock-status status-msg">✓ Exported JSON.</div>
+        </div>
+        <div class="feature-desc">
+          <h3>Profile Import / Export</h3>
+          <p><strong>SSH Config</strong> — compatible with <code>~/.ssh/config</code>, Termius, and Tabby.<br>
+          <strong>JSON</strong> — full backup including all profile fields and actions.</p>
+          <ul class="steps">
+            <li><span class="step-num">1</span>Go to Settings → Import/Export section.</li>
+            <li><span class="step-num">2</span>Import merges new hosts; existing profiles are never overwritten.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Actions import/export -->
+      <div class="feature-card">
+        <div class="feature-demo" style="min-height:180px; flex-direction:column; gap:16px;">
+          <div>
+            <div style="font-size:11px; color:#7f849c; margin-bottom:8px;">Actions for this profile</div>
+            <div class="mock-actions-list">
+              <div class="mock-action-item" style="animation:slideInRight 0.4s 0.5s both;">
+                <div class="mock-action-name">Show Interfaces</div>
+              </div>
+              <div class="mock-action-item" style="animation:slideInRight 0.4s 0.9s both;">
+                <div class="mock-action-name">Ping Gateway</div>
+              </div>
+            </div>
+          </div>
+          <div class="mock-btn-row">
+            <div class="mock-btn secondary" style="font-size:11px; padding:5px 12px;">📥 Import</div>
+            <div class="mock-btn secondary" style="font-size:11px; padding:5px 12px;">📤 Export</div>
+          </div>
+          <div style="font-size:11px; color:#7f849c;">Exports <code>{name, script}</code> — no credentials</div>
+        </div>
+        <div class="feature-desc">
+          <h3>Actions Import / Export</h3>
+          <p>Export just the actions for a profile as a clean JSON file (no passwords, no keys). Import merges by name — duplicates are skipped.</p>
+          <ul class="steps">
+            <li><span class="step-num">1</span>Open a profile → Actions section → click <strong>Export</strong>.</li>
+            <li><span class="step-num">2</span>Open another profile → click <strong>Import</strong> → select the file.</li>
+            <li><span class="step-num">3</span>New actions are appended; same-named actions are skipped.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       10 — SETTINGS & THEMES
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="settings">
+    <div class="section-label">10</div>
+    <h2>Settings &amp; Themes</h2>
+    <p class="section-intro">Customise the look and behaviour of Prateek-Term via the Settings panel (<kbd>⌘,</kbd>).</p>
+
+    <div class="feature-card demo-settings">
+      <div class="feature-demo" style="flex-direction:column; gap:16px; align-items:flex-start;">
+        <!-- Settings cards -->
+        <div class="mock-settings-card settings-card">
+          <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Colour Theme</div>
+          <div class="mock-theme-swatches">
+            <div class="mock-theme-swatch active theme-swatch-active" style="background:#1e1e2e;" title="Catppuccin Mocha"></div>
+            <div class="mock-theme-swatch" style="background:#1c1c1c;" title="One Dark Pro"></div>
+            <div class="mock-theme-swatch" style="background:#002b36;" title="Solarized Dark"></div>
+            <div class="mock-theme-swatch" style="background:#292d3e;" title="Material Ocean"></div>
+            <div class="mock-theme-swatch" style="background:#0d1117;" title="GitHub Dark"></div>
+            <div class="mock-theme-swatch" style="background:#011627;" title="Night Owl"></div>
+          </div>
+          <div style="font-size:11px; color:#7f849c;">Applies instantly to UI and all open terminals.</div>
+        </div>
+        <div class="mock-settings-card settings-card" style="animation-delay:0.7s;">
+          <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Connection Storage</div>
+          <div class="mock-settings-row">
+            <div class="mock-input" style="flex:1; font-size:11px; color:#7f849c;">~/Library/…/connection-profiles.json</div>
+            <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px; flex-shrink:0;">Browse…</div>
+          </div>
+          <div style="font-size:11px; color:#7f849c;">Existing hosts are copied to the new location automatically.</div>
+        </div>
+        <div class="mock-settings-card settings-card" style="animation-delay:1.0s;">
+          <div class="mock-settings-row">
+            <div class="mock-settings-label">Enable debug logging</div>
+            <div class="mock-toggle on"></div>
+          </div>
+          <div style="font-size:11px; color:#7f849c;">Logs app activity to a file for bug reporting.</div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Settings — <kbd>⌘,</kbd></h3>
+        <ul class="steps">
+          <li><span class="step-num">1</span><strong>Colour Theme</strong> — click any swatch for an instant live preview.</li>
+          <li><span class="step-num">2</span><strong>Connection Storage</strong> — change where profiles are saved (e.g. to a synced folder). Existing hosts are migrated automatically.</li>
+          <li><span class="step-num">3</span><strong>Debug Logging</strong> — enable to capture a log file for bug reports. Use "Show in Finder" to locate it.</li>
+        </ul>
+        <div class="tip" style="margin-top:14px;">
+          <span class="tip-icon">⌨️</span>
+          <p><strong>Keyboard shortcuts:</strong>
+            <kbd>⌘K</kbd> Connection Manager ·
+            <kbd>⌘T</kbd> New Tab ·
+            <kbd>⌘B</kbd> Toggle Sidebar ·
+            <kbd>⌘,</kbd> Settings
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Footer ── -->
+  <div class="footer">
+    <p>Prateek-Term v1.0.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
+  </div>
+
+</div><!-- .page-wrap -->
+</body>
+</html>
