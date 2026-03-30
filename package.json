@@ -1,6 +1,6 @@
 {
   "name": "prateek-term",
-  "version": "1.0.0",
+  "version": "1.0.1-rc.1",
   "description": "Prateek-Term - A macOS terminal emulator and SSH connection manager",
   "main": "src/main/main.js",
   "scripts": {
