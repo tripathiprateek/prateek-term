@@ -500,12 +500,10 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   if (!env.PATH) {
     env.PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
   }
-  // Only delete SSH_ASKPASS/SSH_ASKPASS_REQUIRE if we haven't set them ourselves
-  // for password injection (wrapWithAskpass sets them to our temp helper script).
-  if (!options.env?.SSH_ASKPASS) {
-    delete env.SSH_ASKPASS;
-    delete env.SSH_ASKPASS_REQUIRE;
-  }
+  // Prevent SSH from opening a GUI password dialog.
+  // Password injection for SSH is handled by the renderer auto-type (see app.js).
+  delete env.SSH_ASKPASS;
+  delete env.SSH_ASKPASS_REQUIRE;
 
   let term;
   try {
