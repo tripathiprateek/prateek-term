@@ -160,3 +160,54 @@ describe('SSH flags — optional features', () => {
     expect(flags).toContain('BatchMode=yes');
   });
 });
+
+// ---------------------------------------------------------------------------
+// BUG-003: sshpass exit code 1 on keyboard-interactive devices (Teltonika / BusyBox)
+//
+// Cause: OpenSSH tries publickey first; sshpass intercepts the wrong prompt
+//        and exits 1. Devices like Teltonika RUT951 advertise keyboard-interactive
+//        only, so sshpass must be told to skip publickey entirely.
+// Fix:   Add PreferredAuthentications=keyboard-interactive,password when a
+//        password is set and no PEM file is configured.
+// ---------------------------------------------------------------------------
+
+describe('SSH flags — PreferredAuthentications for sshpass (BUG-003)', () => {
+  test('adds PreferredAuthentications=keyboard-interactive,password when password set, no PEM', () => {
+    const flags = buildCommonSSHFlags({ ...BASE_PROFILE, password: 's3cr3t' });
+    const joined = flags.join(' ');
+    expect(joined).toContain('PreferredAuthentications=keyboard-interactive,password');
+  });
+
+  test('does NOT add PreferredAuthentications when no password set', () => {
+    const flags = buildCommonSSHFlags(BASE_PROFILE);
+    const joined = flags.join(' ');
+    expect(joined).not.toContain('PreferredAuthentications');
+  });
+
+  test('does NOT add PreferredAuthentications when PEM file is used (key-based auth)', () => {
+    const flags = buildCommonSSHFlags({
+      ...BASE_PROFILE,
+      password: 's3cr3t',
+      pemFile: '/home/user/.ssh/id_rsa',
+    });
+    const joined = flags.join(' ');
+    expect(joined).not.toContain('PreferredAuthentications');
+  });
+
+  test('Teltonika RUT951 profile generates correct auth flags', () => {
+    // Reproduces the exact failure: sshpass -e ssh … root@192.168.1.1 exits 1
+    const profile = {
+      host: '192.168.1.1',
+      username: 'root',
+      port: 22,
+      password: 'admin123',
+      strictHostOff: true,
+      keepAlive: true,
+    };
+    const flags = buildCommonSSHFlags(profile);
+    const joined = flags.join(' ');
+    expect(joined).toContain('PreferredAuthentications=keyboard-interactive,password');
+    expect(joined).toContain('StrictHostKeyChecking=no');
+    expect(joined).toContain('ServerAliveInterval=60');
+  });
+});
