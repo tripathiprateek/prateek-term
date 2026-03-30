@@ -787,6 +787,13 @@ async function createTab(options = {}) {
     const result = await window.terminalAPI.createTerminal(ptyOptions);
     tab.ptyId = result.id;
 
+    // Arm auto-type for SSH connections with a saved password.
+    // Cleared in onTerminalData after first use so it fires exactly once.
+    const cp = options.connectionProfile;
+    if (cp && cp.password && cp.protocol === 'ssh' && cp.authType === 'password') {
+      tab._pendingPassword = cp.password;
+    }
+
     // Show the exact command being run so SSH errors are self-explanatory
     if (shellCommand && result.debugCmd) {
       term.writeln(`\x1b[90m▶ ${result.debugCmd}\x1b[0m`);
@@ -1618,6 +1625,12 @@ async function reconnectTab(tab) {
       }
       const result = await window.terminalAPI.createTerminal(ptyOptions);
       tab.ptyId = result.id;
+      // Re-arm auto-type on reconnect
+      if (tab.connectionProfile?.password &&
+          tab.connectionProfile?.protocol === 'ssh' &&
+          tab.connectionProfile?.authType === 'password') {
+        tab._pendingPassword = tab.connectionProfile.password;
+      }
       if (shellCommand && result.debugCmd) {
         tab.term.writeln(`\x1b[90m▶ ${result.debugCmd}\x1b[0m`);
       }
@@ -1673,6 +1686,18 @@ function setupTerminalListeners() {
   window.terminalAPI.onTerminalData(({ id, data }) => {
     const tab = state.tabs.find((t) => t.ptyId === id);
     if (tab) {
+      // Auto-type SSH password when server prompts for it.
+      // This is the most reliable injection method: it works regardless of SSH
+      // version, OS patches (e.g. macOS Keychain-patched OpenSSH), or PTY nesting.
+      // _pendingPassword is set when the tab is created with a password profile
+      // and cleared after the first injection so it is sent exactly once.
+      if (tab._pendingPassword && /[Pp]assword|\bassword:/i.test(data)) {
+        const pwd = tab._pendingPassword;
+        tab._pendingPassword = null;
+        // Small delay so the prompt is fully rendered before we respond
+        setTimeout(() => window.terminalAPI.sendInput(id, pwd + '\r'), 80);
+      }
+
       tab.term.write(data);
       if (tab.logId) window.terminalAPI.logWrite(tab.logId, data);
     } else {

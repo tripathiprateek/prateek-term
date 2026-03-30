@@ -204,8 +204,10 @@ function buildSSHCommand(profile) {
 
   args.push(userHost);
 
-  // Use SSH_ASKPASS for password injection (avoids sshpass nested-PTY conflict).
-  return wrapWithAskpass('ssh', args, profile);
+  // Password injection is handled in the renderer via auto-type (see app.js).
+  // The renderer watches PTY output for "Password:" and sends the password via
+  // sendInput — no sshpass, no SSH_ASKPASS, no PTY nesting issues.
+  return { command: 'ssh', args, env: {}, _cleanupFiles: [] };
 }
 
 function buildSFTPCommand(profile) {
