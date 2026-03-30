@@ -753,11 +753,13 @@ async function createTab(options = {}) {
     let shellArgs = [];
     let extraEnv = {};
 
+    let cleanupFiles = [];
     if (options.connectionProfile) {
       const commandInfo = await window.terminalAPI.connect(options.connectionProfile);
-      shellCommand = commandInfo.command;
-      shellArgs = commandInfo.args;
-      extraEnv = commandInfo.env || {};
+      shellCommand  = commandInfo.command;
+      shellArgs     = commandInfo.args;
+      extraEnv      = commandInfo.env || {};
+      cleanupFiles  = commandInfo._cleanupFiles || [];
     }
 
     // Pre-fit: get correct dimensions before spawning the PTY.
@@ -776,9 +778,10 @@ async function createTab(options = {}) {
     };
 
     if (shellCommand) {
-      ptyOptions.shell = shellCommand;
-      ptyOptions.args = shellArgs;
-      ptyOptions.env = extraEnv;
+      ptyOptions.shell         = shellCommand;
+      ptyOptions.args          = shellArgs;
+      ptyOptions.env           = extraEnv;
+      ptyOptions._cleanupFiles = cleanupFiles;
     }
 
     const result = await window.terminalAPI.createTerminal(ptyOptions);
@@ -1594,12 +1597,13 @@ async function reconnectTab(tab) {
         showExitMessage(tab, null);
       });
     } else {
-      let shellCommand = null, shellArgs = [], extraEnv = {};
+      let shellCommand = null, shellArgs = [], extraEnv = {}, cleanupFiles = [];
       if (tab.connectionProfile) {
         const commandInfo = await window.terminalAPI.connect(tab.connectionProfile);
         shellCommand = commandInfo.command;
         shellArgs    = commandInfo.args;
         extraEnv     = commandInfo.env || {};
+        cleanupFiles = commandInfo._cleanupFiles || [];
       }
       const ptyOptions = {
         cols: tab.term.cols,
@@ -1607,9 +1611,10 @@ async function reconnectTab(tab) {
         cwd:  tab.connectionProfile?.cwd || null,
       };
       if (shellCommand) {
-        ptyOptions.shell = shellCommand;
-        ptyOptions.args  = shellArgs;
-        ptyOptions.env   = extraEnv;
+        ptyOptions.shell         = shellCommand;
+        ptyOptions.args          = shellArgs;
+        ptyOptions.env           = extraEnv;
+        ptyOptions._cleanupFiles = cleanupFiles;
       }
       const result = await window.terminalAPI.createTerminal(ptyOptions);
       tab.ptyId = result.id;

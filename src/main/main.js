@@ -500,9 +500,12 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   if (!env.PATH) {
     env.PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
   }
-  // Prevent SSH from trying to open a GUI password dialog instead of using the terminal
-  delete env.SSH_ASKPASS;
-  delete env.SSH_ASKPASS_REQUIRE;
+  // Only delete SSH_ASKPASS/SSH_ASKPASS_REQUIRE if we haven't set them ourselves
+  // for password injection (wrapWithAskpass sets them to our temp helper script).
+  if (!options.env?.SSH_ASKPASS) {
+    delete env.SSH_ASKPASS;
+    delete env.SSH_ASKPASS_REQUIRE;
+  }
 
   let term;
   try {
@@ -534,8 +537,15 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     }
   });
 
+  // Collect askpass temp scripts to delete when the PTY exits
+  const cleanupFiles = options._cleanupFiles || [];
+
   term.onExit(({ exitCode, signal }) => {
     terminals.delete(id);
+    // Clean up SSH_ASKPASS helper scripts written by wrapWithAskpass
+    for (const f of cleanupFiles) {
+      try { fs.unlinkSync(f); } catch { /* already gone */ }
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('terminal:exit', { id, exitCode, signal });
     }

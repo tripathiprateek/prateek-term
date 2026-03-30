@@ -2,127 +2,141 @@
 /**
  * tests/unit/sshpass-wrap.test.js
  *
- * Tests for wrapWithSshpass — specifically the BUG-005 fix:
+ * Tests for wrapWithAskpass — BUG-005 fix:
  *
- * BUG-005: sshpass -e (env var) approach fails silently on macOS because
- * the SSHPASS env var is not reliably propagated through the Electron IPC →
- * contextBridge → node-pty chain. The PTY spawns sshpass with -e but
- * SSHPASS is empty/unset, so SSH auth fails with exit code 1.
+ * BUG-005: sshpass (both -e and -p) fails inside node-pty because sshpass
+ * creates its own inner PTY to intercept SSH's password prompt. When nested
+ * inside node-pty's outer PTY the two PTY layers conflict and the password
+ * injection fails (exit code 1 or exit code 5 "wrong password").
  *
- * Fix: switch to sshpass -p PASSWORD (direct argument) using the full path
- * to the sshpass binary to avoid PATH lookup failures when launched from
- * the macOS Dock.
+ * Fix: drop sshpass entirely and use SSH's built-in SSH_ASKPASS mechanism.
+ *   - Write a temp shell script that echoes the password
+ *   - Set SSH_ASKPASS to that script and SSH_ASKPASS_REQUIRE=force
+ *   - SSH calls the script directly — no PTY nesting, no env-var chain
+ *   - The temp script is deleted after the PTY exits (_cleanupFiles)
  */
 
-const path = require('path');
 const fs   = require('fs');
+const os   = require('os');
 
 // ---------------------------------------------------------------------------
-// Mock fs.accessSync so tests work on any machine regardless of whether
-// sshpass is physically installed at /opt/homebrew/bin/sshpass.
+// Mock fs so tests work without touching the real filesystem
 // ---------------------------------------------------------------------------
 jest.mock('fs', () => {
   const real = jest.requireActual('fs');
   return {
     ...real,
-    accessSync: jest.fn((p, mode) => {
-      // Simulate sshpass installed at Apple Silicon Homebrew path only
-      if (p === '/opt/homebrew/bin/sshpass') return; // found
-      throw new Error('ENOENT');
-    }),
+    accessSync:   jest.fn((p) => { throw new Error('ENOENT'); }),
+    writeFileSync: jest.fn(),
   };
 });
-
-// Also mock child_process.execSync so `which sshpass` fallback doesn't run
 jest.mock('child_process', () => ({
   execSync: jest.fn(() => { throw new Error('not found'); }),
 }));
+jest.mock('crypto', () => ({
+  randomBytes: jest.fn(() => Buffer.from('deadbeef01020304', 'hex')),
+}));
 
-const { wrapWithSshpass, findSshpass, isSshpassAvailable } = require('../../src/main/ssh-utils');
-
-const SSHPASS_PATH = '/opt/homebrew/bin/sshpass';
+const { wrapWithAskpass, writeAskpassScript } = require('../../src/main/ssh-utils');
 
 // ---------------------------------------------------------------------------
-// findSshpass / isSshpassAvailable
+// writeAskpassScript
 // ---------------------------------------------------------------------------
 
-describe('findSshpass', () => {
-  test('returns full path to sshpass binary', () => {
-    expect(findSshpass()).toBe(SSHPASS_PATH);
+describe('writeAskpassScript', () => {
+  beforeEach(() => fs.writeFileSync.mockClear());
+
+  test('writes an executable shell script to tmp dir', () => {
+    writeAskpassScript('mypassword');
+    expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
+    const [filePath, content, opts] = fs.writeFileSync.mock.calls[0];
+    expect(filePath).toContain('ptterm_ap_');
+    expect(content).toContain('#!/bin/sh');
+    expect(content).toContain("printf '%s'");
+    expect(opts.mode).toBe(0o700);
   });
 
-  test('isSshpassAvailable returns true when sshpass found', () => {
-    expect(isSshpassAvailable()).toBe(true);
+  test('embeds the password in the script body', () => {
+    writeAskpassScript('Vf@!2345');
+    const content = fs.writeFileSync.mock.calls[0][1];
+    expect(content).toContain('Vf@!2345');
+  });
+
+  test('escapes single quotes in password safely', () => {
+    writeAskpassScript("it's");
+    const content = fs.writeFileSync.mock.calls[0][1];
+    // Single quote must be escaped as '\''
+    expect(content).toContain("'\\''");
+  });
+
+  test('password with special chars (@, !, #) is embedded verbatim inside quotes', () => {
+    writeAskpassScript('V@!#$%^&*()');
+    const content = fs.writeFileSync.mock.calls[0][1];
+    expect(content).toContain('V@!#$%^&*()');
   });
 });
 
 // ---------------------------------------------------------------------------
-// wrapWithSshpass — password path
+// wrapWithAskpass — password path (BUG-005)
 // ---------------------------------------------------------------------------
 
-describe('wrapWithSshpass — password auth (BUG-005)', () => {
-  const profile = { password: 'Vf@!2345' };
-  let result;
+describe('wrapWithAskpass — password auth (BUG-005)', () => {
+  beforeEach(() => fs.writeFileSync.mockClear());
 
-  beforeEach(() => {
-    result = wrapWithSshpass('ssh', ['-o', 'ConnectTimeout=15', 'root@192.168.1.1'], profile);
-  });
-
-  test('uses full path to sshpass binary (avoids PATH lookup failure from Dock)', () => {
-    expect(result.command).toBe(SSHPASS_PATH);
-  });
-
-  test('uses -p flag (direct arg) instead of -e (env var) to avoid IPC env propagation bug', () => {
-    expect(result.args[0]).toBe('-p');
-  });
-
-  test('passes the password as the second argument immediately after -p', () => {
-    expect(result.args[1]).toBe('Vf@!2345');
-  });
-
-  test('does NOT use -e flag', () => {
-    expect(result.args).not.toContain('-e');
-  });
-
-  test('password with special chars (@, !) is passed verbatim', () => {
-    const r = wrapWithSshpass('ssh', [], { password: 'V@!#$%^&*()f' });
-    expect(r.args[1]).toBe('V@!#$%^&*()f');
-  });
-
-  test('env is empty — SSHPASS not needed with -p flag', () => {
-    expect(result.env).toEqual({});
-  });
-
-  test('ssh command is the third argument', () => {
-    expect(result.args[2]).toBe('ssh');
-  });
-
-  test('original ssh args follow after ssh command', () => {
-    expect(result.args).toContain('-o');
-    expect(result.args).toContain('ConnectTimeout=15');
-    expect(result.args).toContain('root@192.168.1.1');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// wrapWithSshpass — no password / key auth
-// ---------------------------------------------------------------------------
-
-describe('wrapWithSshpass — key/no-password auth', () => {
-  test('returns plain ssh command when no password', () => {
-    const r = wrapWithSshpass('ssh', ['-i', '/home/user/.ssh/id_rsa', 'host'], { password: null });
+  test('returns the original ssh command (no sshpass wrapping)', () => {
+    const r = wrapWithAskpass('ssh', ['-o', 'ConnectTimeout=15', 'root@192.168.1.1'], { password: 'secret' });
     expect(r.command).toBe('ssh');
-    expect(r.args).toContain('-i');
+  });
+
+  test('sets SSH_ASKPASS env to the temp script path', () => {
+    const r = wrapWithAskpass('ssh', [], { password: 'secret' });
+    expect(r.env.SSH_ASKPASS).toContain('ptterm_ap_');
+  });
+
+  test('sets SSH_ASKPASS_REQUIRE=force to bypass controlling-terminal check', () => {
+    const r = wrapWithAskpass('ssh', [], { password: 'secret' });
+    expect(r.env.SSH_ASKPASS_REQUIRE).toBe('force');
+  });
+
+  test('does NOT include sshpass anywhere in command or args', () => {
+    const r = wrapWithAskpass('ssh', ['root@host'], { password: 'secret' });
+    expect(r.command).not.toContain('sshpass');
+    expect(r.args.join(' ')).not.toContain('sshpass');
+  });
+
+  test('original ssh args are preserved unchanged', () => {
+    const r = wrapWithAskpass('ssh', ['-o', 'ConnectTimeout=15', 'root@192.168.1.1'], { password: 'secret' });
+    expect(r.args).toEqual(['-o', 'ConnectTimeout=15', 'root@192.168.1.1']);
+  });
+
+  test('returns _cleanupFiles with the temp script path for post-exit cleanup', () => {
+    const r = wrapWithAskpass('ssh', [], { password: 'secret' });
+    expect(Array.isArray(r._cleanupFiles)).toBe(true);
+    expect(r._cleanupFiles).toHaveLength(1);
+    expect(r._cleanupFiles[0]).toBe(r.env.SSH_ASKPASS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wrapWithAskpass — key / no-password auth
+// ---------------------------------------------------------------------------
+
+describe('wrapWithAskpass — key/no-password auth', () => {
+  test('returns plain ssh command when no password set', () => {
+    const r = wrapWithAskpass('ssh', ['host'], { password: null });
+    expect(r.command).toBe('ssh');
     expect(r.env).toEqual({});
+    expect(r._cleanupFiles).toHaveLength(0);
   });
 
   test('returns plain ssh command when password is empty string', () => {
-    const r = wrapWithSshpass('ssh', ['host'], { password: '' });
-    expect(r.command).toBe('ssh');
+    const r = wrapWithAskpass('ssh', ['host'], { password: '' });
+    expect(r.env).toEqual({});
   });
 
-  test('returns plain ssh command when password is undefined', () => {
-    const r = wrapWithSshpass('ssh', ['host'], {});
+  test('returns plain ssh command when pemFile is set (key-based auth)', () => {
+    const r = wrapWithAskpass('ssh', ['host'], { password: 'secret', pemFile: '/home/user/.ssh/id_rsa' });
     expect(r.command).toBe('ssh');
+    expect(r.env.SSH_ASKPASS).toBeUndefined();
   });
 });

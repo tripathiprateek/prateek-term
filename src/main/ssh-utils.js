@@ -7,8 +7,67 @@
 
 'use strict';
 
-const fs = require('fs');
+const fs     = require('fs');
+const os     = require('os');
+const path   = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
+
+// ---------------------------------------------------------------------------
+// SSH_ASKPASS-based password injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a temporary shell helper script that prints the password to stdout.
+ * SSH calls this script (via SSH_ASKPASS) when it needs the password,
+ * completely bypassing sshpass and any nested-PTY issues.
+ *
+ * The script is written to a system temp directory with mode 0700.
+ * Callers must delete it after the SSH process exits (see _cleanupFiles).
+ */
+function writeAskpassScript(password) {
+  // Escape single quotes for safe embedding in a single-quoted shell string:
+  //   '   →   '\''   (end quote, escaped quote, start quote)
+  const escaped = password.replace(/'/g, "'\\''");
+  const script  = `#!/bin/sh\nprintf '%s' '${escaped}'\n`;
+  const tmpPath = path.join(
+    os.tmpdir(),
+    `ptterm_ap_${crypto.randomBytes(8).toString('hex')}`
+  );
+  fs.writeFileSync(tmpPath, script, { mode: 0o700 });
+  return tmpPath;
+}
+
+/**
+ * Wrap an SSH command to use SSH_ASKPASS for password injection.
+ *
+ * This is the preferred approach over sshpass when running inside node-pty
+ * because sshpass creates its own inner PTY to intercept SSH prompts, which
+ * conflicts with node-pty's outer PTY and causes the password to be injected
+ * at the wrong moment (sshpass exit code 5 — "wrong password" — even when
+ * the password is correct).
+ *
+ * SSH_ASKPASS_REQUIRE=force (OpenSSH ≥ 8.4) makes SSH call the helper script
+ * regardless of whether a controlling terminal is present.
+ *
+ * Returns { command, args, env, _cleanupFiles } where _cleanupFiles is an
+ * array of temp file paths that must be deleted after the PTY exits.
+ */
+function wrapWithAskpass(command, args, profile) {
+  if (!profile.password || profile.pemFile) {
+    return { command, args, env: {}, _cleanupFiles: [] };
+  }
+  const askpassScript = writeAskpassScript(profile.password);
+  return {
+    command,
+    args,
+    env: {
+      SSH_ASKPASS:         askpassScript,
+      SSH_ASKPASS_REQUIRE: 'force',
+    },
+    _cleanupFiles: [askpassScript],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // sshpass detection
@@ -145,7 +204,8 @@ function buildSSHCommand(profile) {
 
   args.push(userHost);
 
-  return wrapWithSshpass('ssh', args, profile);
+  // Use SSH_ASKPASS for password injection (avoids sshpass nested-PTY conflict).
+  return wrapWithAskpass('ssh', args, profile);
 }
 
 function buildSFTPCommand(profile) {
@@ -323,6 +383,8 @@ function profilesToSSHConfig(profiles) {
 }
 
 module.exports = {
+  writeAskpassScript,
+  wrapWithAskpass,
   findSshpass,
   isSshpassAvailable,
   wrapWithSshpass,
