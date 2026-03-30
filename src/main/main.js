@@ -392,6 +392,11 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const env = { ...process.env, ...(options.env || {}) };
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';
+  // Ensure UTF-8 locale so vim/less/man render Unicode (box-drawing chars etc.)
+  // correctly. Without this, apps launched from the macOS Dock may inherit no
+  // locale and fall back to Latin-1, garbling multi-byte characters.
+  if (!env.LANG)    env.LANG    = 'en_US.UTF-8';
+  if (!env.LC_ALL)  env.LC_ALL  = 'en_US.UTF-8';
   if (!env.PATH) {
     env.PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
   }
