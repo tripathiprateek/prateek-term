@@ -75,6 +75,14 @@ function buildCommonSSHFlags(profile) {
   flags.push('-o', 'HostKeyAlgorithms=+ssh-rsa');
   flags.push('-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa'); // renamed from PubkeyAcceptedKeyTypes in 8.5+
 
+  // When a password is set (sshpass path), force keyboard-interactive first then
+  // password. Without this, OpenSSH tries publickey first — sshpass then intercepts
+  // the wrong prompt and the connection fails with exit code 1.
+  // Teltonika / BusyBox devices typically advertise keyboard-interactive only.
+  if (profile.password && !profile.pemFile) {
+    flags.push('-o', 'PreferredAuthentications=keyboard-interactive,password');
+  }
+
   if (profile.pemFile) {
     flags.push('-i', profile.pemFile);
   }
