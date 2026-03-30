@@ -18,32 +18,49 @@ const { execSync } = require('child_process');
  * Return true if sshpass is installed and executable.
  * Checks common Homebrew paths (Intel + Apple Silicon) and /usr/bin.
  */
-function isSshpassAvailable() {
-  const candidates = [
-    '/opt/homebrew/bin/sshpass', // Apple Silicon Homebrew
-    '/usr/local/bin/sshpass',    // Intel Homebrew
-    '/usr/bin/sshpass',
-  ];
-  for (const p of candidates) {
-    try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { /* try next */ }
+const SSHPASS_CANDIDATES = [
+  '/opt/homebrew/bin/sshpass', // Apple Silicon Homebrew
+  '/usr/local/bin/sshpass',    // Intel Homebrew
+  '/usr/bin/sshpass',
+];
+
+/**
+ * Return the full path to sshpass, or null if not installed.
+ * Returning the full path avoids PATH-lookup issues when the PTY env
+ * differs from the login shell env (e.g. Dock launch on macOS).
+ */
+function findSshpass() {
+  for (const p of SSHPASS_CANDIDATES) {
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* try next */ }
   }
   try {
-    execSync('which sshpass', { stdio: 'ignore' });
-    return true;
-  } catch { return false; }
+    const p = execSync('which sshpass', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+    if (p) return p;
+  } catch { /* not found */ }
+  return null;
+}
+
+function isSshpassAvailable() {
+  return findSshpass() !== null;
 }
 
 /**
  * Wrap a command with sshpass if password auth is used AND sshpass is available.
  * Falls back to running ssh directly so the user gets an interactive prompt.
- * Uses SSHPASS env var (-e flag) to avoid exposing password in the process list.
+ *
+ * Uses -p (direct argument) rather than -e (env var) so the password is reliably
+ * delivered even when the PTY env chain doesn't propagate SSHPASS correctly
+ * (a known issue with Electron IPC → node-pty on macOS). The full path to
+ * sshpass is used to avoid PATH-lookup failures when launched from the Dock.
  */
 function wrapWithSshpass(command, args, profile) {
-  if (profile.password && isSshpassAvailable()) {
+  const sshpassPath = profile.password ? findSshpass() : null;
+  if (sshpassPath) {
     return {
-      command: 'sshpass',
-      args: ['-e', command, ...args],
-      env: { SSHPASS: profile.password },
+      command: sshpassPath,
+      args: ['-p', profile.password, command, ...args],
+      env: {},
     };
   }
   return { command, args, env: {} };
@@ -306,6 +323,7 @@ function profilesToSSHConfig(profiles) {
 }
 
 module.exports = {
+  findSshpass,
   isSshpassAvailable,
   wrapWithSshpass,
   buildCommonSSHFlags,
