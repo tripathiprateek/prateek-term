@@ -471,7 +471,11 @@ function findShell() {
 ipcMain.handle('terminal:create', (event, options = {}) => {
   const id = ++terminalIdCounter;
   const shell = options.shell || findShell();
-  const args = options.args || [];
+  // Use -l (login shell) by default so ~/.bash_profile / ~/.zprofile are sourced
+  // and the PTY inherits the user's full PATH (NVM, Homebrew, Go, etc.) — the same
+  // environment iTerm2 and Terminal.app provide. Callers can pass args: [] explicitly
+  // to opt out (e.g. SSH or custom shell connections that manage their own env).
+  const args = options.args || ['-l'];
 
   let cwd = options.cwd || process.env.HOME || '/';
   try {
