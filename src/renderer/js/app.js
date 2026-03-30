@@ -523,6 +523,12 @@ const dom = {
   btnActionCancel:  document.getElementById('btn-action-cancel'),
   btnImportActions: document.getElementById('btn-import-actions'),
   btnExportActions: document.getElementById('btn-export-actions'),
+  // Update banner
+  updateBanner:        document.getElementById('update-banner'),
+  updateBannerText:    document.getElementById('update-banner-text'),
+  updateBannerChannel: document.getElementById('update-banner-channel'),
+  updateDownloadBtn:   document.getElementById('update-download-btn'),
+  updateDismissBtn:    document.getElementById('update-dismiss-btn'),
 };
 
 // ===== Terminal Management =====
@@ -2759,6 +2765,30 @@ async function populateSerialPorts() {
   }
 }
 
+// ── Auto-update banner ────────────────────────────────────────────────────────
+
+let _pendingUpdateUrl = null;
+
+function setupUpdateBanner() {
+  window.terminalAPI.onUpdateAvailable(({ version, url, prerelease }) => {
+    _pendingUpdateUrl = url;
+    dom.updateBannerText.textContent = `Prateek-Term v${version} is available`;
+    dom.updateBannerChannel.textContent = prerelease ? 'RC / Pre-release' : 'Stable';
+    dom.updateBanner.classList.remove('hidden');
+    dom.updateBanner.classList.toggle('prerelease', !!prerelease);
+  });
+
+  dom.updateDownloadBtn.addEventListener('click', () => {
+    if (_pendingUpdateUrl) window.terminalAPI.openUpdateUrl(_pendingUpdateUrl);
+  });
+
+  dom.updateDismissBtn.addEventListener('click', () => {
+    dom.updateBanner.classList.add('hidden');
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function setupEventListeners() {
   // New tab
   dom.btnNewTab.addEventListener('click', () => {
@@ -3234,6 +3264,7 @@ async function init() {
     window.terminalAPI.onOpenFolder(openLocalFolderTab);
     window.terminalAPI.onAutoConnect((profile) => quickConnect(profile));
     window.terminalAPI.rendererReady();   // flush any buffered open-folder URLs
+    setupUpdateBanner();
   } catch (err) {
     console.error('Failed to initialize:', err);
   }

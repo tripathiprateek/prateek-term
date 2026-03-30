@@ -111,6 +111,51 @@ body {
   border-color: var(--accent-blue);
 }
 
+/* ===== Update Banner ===== */
+#update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 12px;
+  z-index: 200;
+}
+#update-banner.hidden { display: none; }
+#update-banner.prerelease { background: var(--accent-peach, #f59e0b); }
+#update-banner-text { flex: 1; }
+.update-channel-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.2);
+  white-space: nowrap;
+}
+#update-download-btn {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 5px;
+  padding: 2px 10px;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#update-download-btn:hover { background: rgba(255,255,255,0.35); }
+#update-dismiss-btn {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+#update-dismiss-btn:hover { color: #fff; }
+
 /* ===== Tab Bar ===== */
 #tab-bar {
   height: var(--tab-height);

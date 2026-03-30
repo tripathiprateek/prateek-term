@@ -132,4 +132,18 @@ contextBridge.exposeInMainWorld('terminalAPI', {
     ipcRenderer.on('open-folder', listener);
     return () => ipcRenderer.removeListener('open-folder', listener);
   },
+
+  // ── Auto-update ──────────────────────────────────────────────────────────
+  // Check for updates (pass { includePrerelease: true } to include RC/beta)
+  checkForUpdates: (opts) => ipcRenderer.invoke('update:check', opts),
+  // Get current version info: { version, buildNum, channel }
+  getVersionInfo:  ()     => ipcRenderer.invoke('update:get-version'),
+  // Open the release URL in the default browser
+  openUpdateUrl:   (url)  => ipcRenderer.send('update:open-url', url),
+  // Subscribe to update notifications pushed from main (returns unsubscribe fn)
+  onUpdateAvailable: (cb) => {
+    const listener = (_, data) => cb(data);
+    ipcRenderer.on('update:available', listener);
+    return () => ipcRenderer.removeListener('update:available', listener);
+  },
 });
