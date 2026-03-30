@@ -11,7 +11,7 @@
  * See LICENSE file in the project root for full license terms.
  */
 
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const crypto = require('crypto');
 const pty = require('node-pty');
@@ -42,6 +42,83 @@ function getBuildNumber() {
     return fs.readFileSync(p, 'utf8').trim();
   } catch { return '0'; }
 }
+
+// ── Version info & auto-update ────────────────────────────────────────────
+
+/**
+ * Returns the current version, build number, and channel label.
+ * Channel: Stable | Release Candidate | Beta | Pre-release | Local Dev
+ */
+function getVersionInfo() {
+  const version  = app.getVersion();
+  const buildNum = getBuildNumber();
+  let channel = 'Stable';
+  if (!buildNum || buildNum === '0') {
+    channel = 'Local Dev';
+  } else if (/-rc\.\d+/i.test(version)) {
+    channel = 'Release Candidate';
+  } else if (/-beta\.\d+/i.test(version)) {
+    channel = 'Beta';
+  } else if (/-/.test(version)) {
+    channel = 'Pre-release';
+  }
+  return { version, buildNum: buildNum || 'dev', channel };
+}
+
+/**
+ * Compare two semver strings (ignores pre-release suffixes for the numeric part).
+ * Returns true if remote version number is strictly greater than local.
+ */
+function isVersionNewer(remote, local) {
+  const nums = (v) => v.replace(/^v/, '').split('-')[0].split('.').map(Number);
+  const [rM, rm, rp] = nums(remote);
+  const [lM, lm, lp] = nums(local);
+  if (rM !== lM) return rM > lM;
+  if (rm !== lm) return rm > lm;
+  return rp > lp;
+}
+
+const RELEASES_API = 'https://api.github.com/repos/tripathiprateek/prateek-term/releases';
+const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+
+/**
+ * Fetch the latest GitHub release and notify the renderer if a newer version
+ * is available. Pass includePrerelease=true to surface RC/beta releases.
+ */
+async function checkForUpdates(includePrerelease = false) {
+  try {
+    const res = await fetch(`${RELEASES_API}?per_page=10`, {
+      headers: { 'User-Agent': 'prateek-term', Accept: 'application/vnd.github.v3+json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const releases = await res.json();
+    if (!Array.isArray(releases)) return null;
+
+    // Find the newest release matching channel preference
+    const candidate = releases.find(r => !r.draft && (includePrerelease || !r.prerelease));
+    if (!candidate) return null;
+
+    const remoteVersion = (candidate.tag_name || '').replace(/^v/, '');
+    const localVersion  = app.getVersion();
+    if (remoteVersion && isVersionNewer(remoteVersion, localVersion)) {
+      const payload = {
+        version:    remoteVersion,
+        url:        candidate.html_url,
+        prerelease: candidate.prerelease,
+      };
+      // Notify all open windows
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('update:available', payload);
+      });
+      return payload;
+    }
+    return null;
+  } catch {
+    return null; // network errors are always silent
+  }
+}
+
 const { SerialPort } = require('serialport');
 
 // Multiple instances are allowed — each window is independent.
@@ -266,11 +343,11 @@ app.whenReady().then(() => {
     // icon not found in dev, not critical
   }
 
-  const buildNum = getBuildNumber();
+  const { version, buildNum, channel } = getVersionInfo();
   app.setAboutPanelOptions({
     applicationName: 'Prateek-Term',
-    applicationVersion: `1.0.0 (build ${buildNum})`,
-    version: buildNum,
+    applicationVersion: `${version} — ${channel}`,
+    version: `Build ${buildNum}`,
     credits: 'Developed by Prateek Tripathi\ntripathiprateek@gmail.com\n\nLicensed under the Polyform Noncommercial License 1.0.0.\nNon-commercial use only. Attribution required for derivative works.\nFor commercial use, contact: tripathiprateek@gmail.com',
     copyright: '© 2026 Prateek Tripathi. All rights reserved.',
   });
@@ -322,6 +399,20 @@ app.whenReady().then(() => {
         { role: 'front' },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => checkForUpdates(),
+        },
+        { type: 'separator' },
+        {
+          label: 'Visit GitHub Repository',
+          click: () => shell.openExternal('https://github.com/tripathiprateek/prateek-term'),
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
@@ -334,6 +425,11 @@ app.whenReady().then(() => {
 
   installQuickActionIfNeeded();
   createWindow();
+
+  // Check for updates on startup (5s delay so window is fully rendered first)
+  // and then every 6 hours. Errors are silent.
+  setTimeout(() => checkForUpdates(), 5000);
+  setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL);
 });
 
 app.on('window-all-closed', () => {
@@ -720,6 +816,11 @@ ipcMain.handle('help:open', () => {
   helpWindow.loadFile(path.join(__dirname, '..', 'renderer', 'help.html'));
   helpWindow.on('closed', () => { helpWindow = null; });
 });
+
+// ── Update IPC ───────────────────────────────────────────────────────────
+ipcMain.handle('update:check',       (_, opts) => checkForUpdates(opts?.includePrerelease));
+ipcMain.handle('update:get-version', ()        => getVersionInfo());
+ipcMain.on(   'update:open-url',     (_, url)  => shell.openExternal(url));
 
 ipcMain.handle('dialog:openFile', async (event, options = {}) => {
   const result = await dialog.showOpenDialog(mainWindow, {
