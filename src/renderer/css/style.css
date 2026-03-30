@@ -507,11 +507,10 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  /* Keep display:block so FitAddon can always measure the container.
-     Using display:none caused xterm to open with cell dimensions = 0,
-     making fitAddon.fit() silently fail (its guard bails on 0 cell size),
-     producing wrong column counts and broken line wrapping. */
-  display: block;
+  /* flex column: filter bar (when visible) sits at top, viewport fills rest.
+     display:flex (not none) keeps container measurable for FitAddon. */
+  display: flex;
+  flex-direction: column;
   visibility: hidden;
   pointer-events: none;
   overflow: hidden;
@@ -522,9 +521,86 @@ body {
   pointer-events: auto;
 }
 
+/* xterm renders inside .terminal-viewport, not directly in .terminal-pane */
+.terminal-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
 .terminal-pane .xterm {
   height: 100%;
 }
+
+/* ─── Serial output filter bar ───────────────────────────────────────────── */
+.serial-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 10;
+  order: -1; /* sits above .terminal-viewport */
+}
+.serial-filter-bar.hidden { display: none; }
+
+.serial-filter-bar .filter-icon { color: var(--text-muted); flex-shrink: 0; }
+
+.filter-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: 'SF Mono', monospace;
+  color: var(--text-primary);
+  outline: none;
+}
+.filter-input:focus   { border-color: var(--accent-blue); }
+.filter-input.invalid { border-color: var(--accent-red);  }
+
+.filter-regex-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: 'SF Mono', monospace;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.filter-regex-btn.active             { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.filter-regex-btn:hover:not(.active) { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+.filter-stats {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: right;
+  font-family: 'SF Mono', monospace;
+}
+
+.filter-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.filter-clear-btn:hover { color: var(--accent-red); }
 
 /* ===== Modal ===== */
 .modal {

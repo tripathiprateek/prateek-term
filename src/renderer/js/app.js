@@ -592,8 +592,28 @@ async function createTab(options = {}) {
   pane.id = `terminal-pane-${tabId}`;
   dom.terminalContainer.appendChild(pane);
 
+  // Filter bar (created for every tab; only shown for serial tabs when activated)
+  const filterBar = document.createElement('div');
+  filterBar.className = 'serial-filter-bar hidden';
+  filterBar.innerHTML = `
+    <svg class="filter-icon" width="13" height="13" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2.5">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+    </svg>
+    <input class="filter-input" type="text" placeholder="Filter output… (text or /regex/)" spellcheck="false">
+    <button class="filter-regex-btn" title="Toggle regex mode">.*</button>
+    <span class="filter-stats"></span>
+    <button class="filter-clear-btn" title="Disable filter">✕</button>
+  `;
+  pane.appendChild(filterBar);
+
+  // xterm renders into the viewport div (flex:1 sibling of filter bar)
+  const viewport = document.createElement('div');
+  viewport.className = 'terminal-viewport';
+  pane.appendChild(viewport);
+
   const { term, fitAddon, searchAddon } = createTerminalInstance();
-  term.open(pane);
+  term.open(viewport);
 
   const tab = {
     id: tabId,
@@ -606,8 +626,17 @@ async function createTab(options = {}) {
     fitAddon,
     searchAddon,
     pane,
+    filterBar,
     connectionProfile: options.connectionProfile || null,
     activeTransferId: null,
+    // Serial output filter state
+    filterActive:     false,
+    filterPattern:    '',
+    filterIsRegex:    false,
+    filterLineBuffer: '',
+    filterMatchCount: 0,
+    filterTotalCount: 0,
+    _filterRegex:     null,
   };
 
   if (isSerial) {
@@ -635,10 +664,52 @@ async function createTab(options = {}) {
 
     tab.serialId = serialResult.id;
 
+    // Wire serial filter bar controls
+    const filterInput    = filterBar.querySelector('.filter-input');
+    const filterRegexBtn = filterBar.querySelector('.filter-regex-btn');
+    const filterClearBtn = filterBar.querySelector('.filter-clear-btn');
+
+    filterInput.addEventListener('input', () => {
+      tab.filterPattern    = filterInput.value;
+      tab._filterRegex     = null;
+      tab.filterMatchCount = 0;
+      tab.filterTotalCount = 0;
+      if (tab.filterIsRegex && tab.filterPattern) {
+        try {
+          tab._filterRegex = new RegExp(tab.filterPattern, 'i');
+          filterInput.classList.remove('invalid');
+        } catch {
+          filterInput.classList.add('invalid');
+          // invalid regex → show all lines until user corrects it
+        }
+      } else {
+        filterInput.classList.remove('invalid');
+      }
+      updateSerialFilterStats(tab);
+    });
+
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') disableSerialFilter(tab);
+    });
+
+    filterRegexBtn.addEventListener('click', () => {
+      tab.filterIsRegex = !tab.filterIsRegex;
+      tab._filterRegex  = null;
+      filterRegexBtn.classList.toggle('active', tab.filterIsRegex);
+      filterInput.dispatchEvent(new Event('input')); // re-validate
+    });
+
+    filterClearBtn.addEventListener('click', () => disableSerialFilter(tab));
+
     const removeDataListener = window.terminalAPI.onSerialData(({ id, data }) => {
       if (id !== tab.serialId) return;
-      term.write(data);
+      // Raw data is always logged before filtering (filter only affects display)
       if (tab.logId) window.terminalAPI.logWrite(tab.logId, data);
+      if (tab.filterActive && tab.filterPattern) {
+        writeSerialFiltered(tab, data);
+      } else {
+        term.write(data);
+      }
     });
     const removeExitListener = window.terminalAPI.onSerialExit(({ id, error }) => {
       if (id !== tab.serialId) return;
@@ -681,6 +752,15 @@ async function createTab(options = {}) {
       shellCommand = commandInfo.command;
       shellArgs = commandInfo.args;
       extraEnv = commandInfo.env || {};
+    }
+
+    // Pre-fit: get correct dimensions before spawning the PTY.
+    // The pane is display:block (visibility:hidden) so the container has real
+    // layout dimensions and xterm has already measured cell size via term.open().
+    // Without this, term.cols/rows default to 80×24 and the shell starts narrow.
+    const proposed = fitAddon.proposeDimensions();
+    if (proposed && proposed.cols > 0) {
+      term.resize(proposed.cols, proposed.rows);
     }
 
     const ptyOptions = {
@@ -728,10 +808,6 @@ async function createTab(options = {}) {
       return true;
     });
 
-    setTimeout(() => {
-      fitAddon.fit();
-      if (tab.ptyId) window.terminalAPI.resizeTerminal(tab.ptyId, term.cols, term.rows);
-    }, 50);
   }
 
   state.tabs.push(tab);
@@ -1239,6 +1315,79 @@ function showAddSelectionAsActionDialog(x, y, script, tab) {
   setTimeout(() => document.addEventListener('mousedown', onOutside), 0);
 }
 
+// ===== Serial Output Filter =====
+
+/**
+ * Write incoming serial data through the active line filter.
+ * Only lines matching tab.filterPattern are forwarded to xterm.
+ * Buffers incomplete lines across IPC data chunks.
+ */
+function writeSerialFiltered(tab, data) {
+  tab.filterLineBuffer += data;
+  const lines = tab.filterLineBuffer.split('\n');
+  tab.filterLineBuffer = lines.pop(); // hold back the last incomplete chunk
+
+  for (const line of lines) {
+    tab.filterTotalCount++;
+    if (serialLineMatchesFilter(line, tab)) {
+      tab.filterMatchCount++;
+      tab.term.write(line + '\n');
+    }
+  }
+  updateSerialFilterStats(tab);
+}
+
+/** Test one complete line against the tab's filter (text or regex). */
+function serialLineMatchesFilter(line, tab) {
+  // Strip ANSI escape codes before matching so colour sequences don't interfere
+  const plain = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
+  if (tab.filterIsRegex) {
+    if (!tab._filterRegex) return true; // invalid regex → show all
+    return tab._filterRegex.test(plain);
+  }
+  return plain.toLowerCase().includes(tab.filterPattern.toLowerCase());
+}
+
+/** Update the "12/50" matched/total counter in the filter bar. */
+function updateSerialFilterStats(tab) {
+  const el = tab.filterBar?.querySelector('.filter-stats');
+  if (el) el.textContent = `${tab.filterMatchCount}/${tab.filterTotalCount}`;
+}
+
+/** Show the filter bar and focus the input for a serial tab. */
+function enableSerialFilter(tab) {
+  if (!tab.isSerial || !tab.filterBar) return;
+  tab.filterActive     = true;
+  tab.filterLineBuffer = '';
+  tab.filterMatchCount = 0;
+  tab.filterTotalCount = 0;
+  tab._filterRegex     = null;
+  tab.filterBar.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    tab.fitAddon.fit();
+    tab.filterBar.querySelector('.filter-input').focus();
+  });
+}
+
+/** Hide the filter bar and restore full terminal height. */
+function disableSerialFilter(tab) {
+  if (!tab.filterBar) return;
+  tab.filterActive     = false;
+  tab.filterPattern    = '';
+  tab.filterLineBuffer = '';
+  tab._filterRegex     = null;
+  const bar = tab.filterBar;
+  bar.classList.add('hidden');
+  bar.querySelector('.filter-input').value = '';
+  bar.querySelector('.filter-input').classList.remove('invalid');
+  bar.querySelector('.filter-stats').textContent = '';
+  bar.querySelector('.filter-regex-btn').classList.remove('active');
+  requestAnimationFrame(() => {
+    tab.fitAddon.fit();
+    tab.term.focus();
+  });
+}
+
 // ===== Terminal Context Menu =====
 
 function showTerminalContextMenu(x, y, term, tab) {
@@ -1276,6 +1425,15 @@ function showTerminalContextMenu(x, y, term, tab) {
       </svg>
       Stop Logging
     </button>
+    ${tab.isSerial ? `
+    <div class="ctx-divider"></div>
+    <button class="ctx-filter-toggle">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+      </svg>
+      ${tab.filterActive ? 'Disable Filter' : 'Filter Output…'}
+    </button>
+    ` : ''}
   `;
 
   const sendText = (text) => {
@@ -1363,6 +1521,12 @@ function showTerminalContextMenu(x, y, term, tab) {
     tab.logId = null;
     tab.logPath = null;
     removeLogBadge(tab);
+  });
+
+  // Filter toggle (serial tabs only)
+  menu.querySelector('.ctx-filter-toggle')?.addEventListener('click', () => {
+    menu.remove();
+    tab.filterActive ? disableSerialFilter(tab) : enableSerialFilter(tab);
   });
 
   // Position menu — keep it inside the viewport
