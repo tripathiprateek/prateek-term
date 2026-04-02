@@ -1884,9 +1884,10 @@ function renderSidebarHosts() {
       const host = document.createElement('div');
       host.className = 'sidebar-host';
 
+      const isAiAccessible = (profile.tags || []).some((t) => (t.name || t) === 'ai');
       const tagDots = (profile.tags || []).map((t) =>
         `<span class="host-tag-dot" style="background:${escapeHtml(t.color)}" title="${escapeHtml(t.name)}"></span>`
-      ).join('');
+      ).join('') + (isAiAccessible ? '<span class="host-ai-badge" title="AI-accessible via MCP">AI</span>' : '');
 
       host.innerHTML = `
         <span class="host-dot ${proto}"></span>
@@ -2892,6 +2893,32 @@ function setupEventListeners() {
     await loadDebugLog();
   });
 
+  // MCP enable/disable toggle
+  const mcpToggle = document.getElementById('toggle-mcp-enabled');
+  if (mcpToggle) {
+    mcpToggle.addEventListener('change', () => {
+      settingsState.mcpEnabled = mcpToggle.checked;
+      settingsState.mcpPort    = parseInt(document.getElementById('settings-mcp-port')?.value || '29419', 10) || 29419;
+      updateMcpStatusBadge(settingsState.mcpEnabled);
+    });
+  }
+  document.getElementById('settings-mcp-port')?.addEventListener('change', (e) => {
+    settingsState.mcpPort = parseInt(e.target.value, 10) || 29419;
+  });
+  document.getElementById('btn-mcp-copy-config')?.addEventListener('click', copyMcpConfig);
+  document.getElementById('btn-mcp-register')?.addEventListener('click', registerMcpClients);
+
+  // Settings sidebar tab switching
+  document.querySelectorAll('.settings-nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.settings-panel').forEach((p) => p.classList.remove('active'));
+      btn.classList.add('active');
+      const panel = document.getElementById(`settings-tab-${btn.dataset.tab}`);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
   // Connection manager
   dom.btnConnectionManager.addEventListener('click', openConnectionManager);
   dom.modalClose.addEventListener('click', closeConnectionManager);
@@ -3088,12 +3115,12 @@ function setupEventListeners() {
 
 // ===== Settings =====
 
-let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false };
+let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: 29419 };
 
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
-  settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, ...s };
+  settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: 29419, ...s };
   document.getElementById('settings-profiles-path').value = s.profilesPath || '';
   renderThemePicker(settingsState.theme);
 
@@ -3107,6 +3134,15 @@ async function openSettings() {
       if (settingsState.debugLogging) loadDebugLog();
     }
   }
+
+  // MCP toggle + port
+  const mcpToggle = document.getElementById('toggle-mcp-enabled');
+  const mcpPortEl = document.getElementById('settings-mcp-port');
+  if (mcpToggle) {
+    mcpToggle.checked = !!settingsState.mcpEnabled;
+    updateMcpStatusBadge(settingsState.mcpEnabled);
+  }
+  if (mcpPortEl) mcpPortEl.value = settingsState.mcpPort || 29419;
 
   setSettingsStatus('');
   modal.classList.remove('hidden');
@@ -3163,6 +3199,76 @@ function setSettingsStatus(msg, isError = false) {
   const el = document.getElementById('settings-status');
   el.textContent = msg;
   el.className = 'settings-status' + (isError ? ' error' : '');
+}
+
+async function updateMcpStatusBadge(enabled) {
+  const badge = document.getElementById('mcp-status-badge');
+  if (!badge) return;
+  if (!enabled) {
+    badge.textContent = 'Disabled';
+    badge.className = 'mcp-status-badge mcp-status-badge--off';
+    return;
+  }
+  try {
+    const status = await window.terminalAPI.mcpStatus();
+    badge.textContent = status.running ? `Active on :${status.port}` : 'Starting…';
+    badge.className = 'mcp-status-badge mcp-status-badge--on';
+  } catch {
+    badge.textContent = 'Error';
+    badge.className = 'mcp-status-badge mcp-status-badge--off';
+  }
+}
+
+async function copyMcpConfig() {
+  const appPath = '/Applications/Prateek-Term.app/Contents/Resources/app/src/mcp/server.js';
+  const config = {
+    mcpServers: {
+      'prateek-term': {
+        command: 'node',
+        args: [appPath],
+      },
+    },
+  };
+  const snippet = JSON.stringify(config, null, 2);
+  try {
+    await navigator.clipboard.writeText(snippet);
+    setSettingsStatus('MCP config copied to clipboard — paste into your AI client config.');
+  } catch {
+    setSettingsStatus('Could not copy — config: ' + JSON.stringify({ command: 'node', args: [appPath] }), true);
+  }
+}
+
+async function registerMcpClients() {
+  const btn = document.getElementById('btn-mcp-register');
+  const resultEl = document.getElementById('mcp-register-result');
+  if (btn) { btn.disabled = true; btn.textContent = 'Registering…'; }
+  if (resultEl) resultEl.style.display = 'none';
+
+  try {
+    const res = await window.terminalAPI.mcpRegister();
+    const lines = [];
+
+    if (res.claudeCode) {
+      const icon = res.claudeCode.ok ? '✓' : '✗';
+      lines.push(`<span style="color:${res.claudeCode.ok ? '#a6e3a1' : '#f38ba8'}">${icon} Claude Code: ${res.claudeCode.message}</span>`);
+    }
+    if (res.claudeDesktop) {
+      const icon = res.claudeDesktop.ok ? '✓' : '✗';
+      lines.push(`<span style="color:${res.claudeDesktop.ok ? '#a6e3a1' : '#f38ba8'}">${icon} Claude Desktop: ${res.claudeDesktop.message}</span>`);
+    }
+
+    if (resultEl) {
+      resultEl.innerHTML = lines.join('<br>');
+      resultEl.style.display = 'block';
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.innerHTML = `<span style="color:#f38ba8">✗ Error: ${e.message}</span>`;
+      resultEl.style.display = 'block';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Register with AI Clients'; }
+  }
 }
 
 async function chooseProfilesPath() {

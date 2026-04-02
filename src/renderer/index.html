@@ -673,134 +673,214 @@
         <button class="modal-close" id="settings-modal-close">&times;</button>
       </div>
 
-      <div class="settings-body">
+      <!-- Sidebar navigation + panel layout -->
+      <div class="settings-layout">
 
-        <!-- Storage Location -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Connection Storage</h3>
-          <p class="settings-section-desc">
-            Choose where Prateek-Term stores your hosts file. Point it to Dropbox,
-            iCloud Drive, or any shared folder to sync across machines.
-          </p>
-          <div class="settings-path-row">
-            <input type="text" id="settings-profiles-path" class="settings-path-input" readonly
-                   placeholder="Default: ~/Library/Application Support/Prateek-Term/connection-profiles.json">
-            <button id="btn-choose-path" class="btn btn-secondary btn-sm">Browse…</button>
-          </div>
-          <p class="settings-path-note">
-            Existing hosts will be copied to the new location automatically.
-          </p>
-        </section>
-
-        <div class="settings-divider"></div>
-
-        <!-- Theme -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Colour Theme</h3>
-          <p class="settings-section-desc">
-            Applies instantly to the UI and all open terminals. Click a theme to preview.
-          </p>
-          <div id="theme-picker-grid" class="theme-picker-grid"></div>
-        </section>
-
-        <div class="settings-divider"></div>
-
-        <!-- Import -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Import</h3>
-          <p class="settings-section-desc">
-            Merge hosts from an external source into your current list.
-            Duplicate IDs are skipped.
-          </p>
-          <div class="settings-import-buttons">
-            <button id="btn-import-ssh" class="btn btn-secondary settings-io-btn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg>
-              SSH Config
-              <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
-            </button>
-            <button id="btn-import-json" class="btn btn-secondary settings-io-btn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
-              </svg>
-              Prateek-Term JSON
-              <span class="settings-io-badge">Native backup</span>
-            </button>
-          </div>
-        </section>
-
-        <div class="settings-divider"></div>
-
-        <!-- Export -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Export</h3>
-          <p class="settings-section-desc">
-            Save your hosts to a file. SSH Config can be opened directly by
-            Termius, Tabby, iTerm2, and any OpenSSH client.
-          </p>
-          <div class="settings-import-buttons">
-            <button id="btn-export-ssh" class="btn btn-secondary settings-io-btn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 16 12 21 17 16"></polyline>
-                <line x1="12" y1="21" x2="12" y2="9"></line>
-              </svg>
-              SSH Config
-              <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
-            </button>
-            <button id="btn-export-json" class="btn btn-secondary settings-io-btn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 16 12 21 17 16"></polyline>
-                <line x1="12" y1="21" x2="12" y2="9"></line>
-              </svg>
-              Prateek-Term JSON
-              <span class="settings-io-badge">Full backup</span>
-            </button>
-          </div>
-        </section>
-
-        <div class="settings-divider"></div>
-
-        <!-- Debug Section -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        <nav class="settings-nav">
+          <button class="settings-nav-item active" data-tab="general">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
             </svg>
-            Debug &amp; Diagnostics
-          </h3>
-          <div class="settings-debug-toggle-row">
-            <label class="settings-toggle-label" for="toggle-debug-logging">
-              Enable debug logging
-              <span class="settings-toggle-hint">Logs app activity to a file. Share with the developer when reporting issues.</span>
-            </label>
-            <label class="settings-toggle">
-              <input type="checkbox" id="toggle-debug-logging">
-              <span class="settings-toggle-track"></span>
-            </label>
-          </div>
-          <div id="debug-log-panel" class="debug-log-panel hidden">
-            <div class="debug-log-toolbar">
-              <span id="debug-log-meta" class="debug-log-meta">No entries yet</span>
-              <div class="debug-log-actions">
-                <button id="btn-debug-refresh" class="btn btn-sm btn-secondary">Refresh</button>
-                <button id="btn-debug-copy" class="btn btn-sm btn-secondary">Copy All</button>
-                <button id="btn-debug-show-file" class="btn btn-sm btn-secondary">Show in Finder</button>
-                <button id="btn-debug-clear" class="btn btn-sm btn-danger">Clear</button>
-              </div>
-            </div>
-            <div id="debug-log-path" class="debug-log-path"></div>
-            <pre id="debug-log-content" class="debug-log-content">No log entries yet.</pre>
-          </div>
-        </section>
+            General
+          </button>
+          <button class="settings-nav-item" data-tab="appearance">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <circle cx="12" cy="12" r="4"></circle>
+              <line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line>
+              <line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line>
+              <line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line>
+              <line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line>
+            </svg>
+            Appearance
+          </button>
+          <button class="settings-nav-item" data-tab="data">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+            </svg>
+            Data
+          </button>
+          <button class="settings-nav-item" data-tab="ai">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+            AI / MCP
+          </button>
+          <button class="settings-nav-item" data-tab="developer">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            Developer
+          </button>
+        </nav>
 
-      </div>
+        <div class="settings-panels">
+
+          <!-- General -->
+          <div class="settings-panel active" id="settings-tab-general">
+            <section class="settings-section">
+              <h3 class="settings-section-title">Connection Storage</h3>
+              <p class="settings-section-desc">
+                Choose where Prateek-Term stores your hosts file. Point it to Dropbox,
+                iCloud Drive, or any shared folder to sync across machines.
+              </p>
+              <div class="settings-path-row">
+                <input type="text" id="settings-profiles-path" class="settings-path-input" readonly
+                       placeholder="Default: ~/Library/Application Support/Prateek-Term/connection-profiles.json">
+                <button id="btn-choose-path" class="btn btn-secondary btn-sm">Browse…</button>
+              </div>
+              <p class="settings-path-note">Existing hosts will be copied to the new location automatically.</p>
+            </section>
+          </div>
+
+          <!-- Appearance -->
+          <div class="settings-panel" id="settings-tab-appearance">
+            <section class="settings-section">
+              <h3 class="settings-section-title">Colour Theme</h3>
+              <p class="settings-section-desc">
+                Applies instantly to the UI and all open terminals. Click a theme to preview.
+              </p>
+              <div id="theme-picker-grid" class="theme-picker-grid"></div>
+            </section>
+          </div>
+
+          <!-- Data -->
+          <div class="settings-panel" id="settings-tab-data">
+            <section class="settings-section">
+              <h3 class="settings-section-title">Import</h3>
+              <p class="settings-section-desc">
+                Merge hosts from an external source into your current list. Duplicate IDs are skipped.
+              </p>
+              <div class="settings-import-buttons">
+                <button id="btn-import-ssh" class="btn btn-secondary settings-io-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                  SSH Config
+                  <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
+                </button>
+                <button id="btn-import-json" class="btn btn-secondary settings-io-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                  </svg>
+                  Prateek-Term JSON
+                  <span class="settings-io-badge">Native backup</span>
+                </button>
+              </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <section class="settings-section">
+              <h3 class="settings-section-title">Export</h3>
+              <p class="settings-section-desc">
+                Save your hosts to a file. SSH Config can be opened directly by Termius, Tabby, iTerm2, and any OpenSSH client.
+              </p>
+              <div class="settings-import-buttons">
+                <button id="btn-export-ssh" class="btn btn-secondary settings-io-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 16 12 21 17 16"></polyline>
+                    <line x1="12" y1="21" x2="12" y2="9"></line>
+                  </svg>
+                  SSH Config
+                  <span class="settings-io-badge">Termius · Tabby · OpenSSH</span>
+                </button>
+                <button id="btn-export-json" class="btn btn-secondary settings-io-btn">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 16 12 21 17 16"></polyline>
+                    <line x1="12" y1="21" x2="12" y2="9"></line>
+                  </svg>
+                  Prateek-Term JSON
+                  <span class="settings-io-badge">Full backup</span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- AI / MCP -->
+          <div class="settings-panel" id="settings-tab-ai">
+            <section class="settings-section">
+              <h3 class="settings-section-title">MCP Server</h3>
+              <p class="settings-section-desc">
+                Lets AI agents (Claude Desktop, Claude Code) control terminal sessions via localhost.
+                Only profiles tagged <strong>ai</strong> are accessible — credentials are never exposed.
+              </p>
+              <div class="settings-debug-toggle-row">
+                <label class="settings-toggle-label" for="toggle-mcp-enabled">
+                  Enable MCP server
+                  <span class="settings-toggle-hint">Starts a local HTTP bridge on the port below. Requires app restart if port changes.</span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" id="toggle-mcp-enabled">
+                  <span class="settings-toggle-track"></span>
+                </label>
+              </div>
+              <div class="settings-mcp-row">
+                <label class="settings-field-label" for="settings-mcp-port">Port</label>
+                <input type="number" id="settings-mcp-port" class="settings-input settings-input--short" value="29419" min="1024" max="65535">
+                <span id="mcp-status-badge" class="mcp-status-badge mcp-status-badge--off">Disabled</span>
+              </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
+            <section class="settings-section">
+              <h3 class="settings-section-title">AI Client Registration</h3>
+              <p class="settings-section-desc">
+                Automatically register Prateek-Term as an MCP server in Claude Code (user scope) and Claude Desktop.
+                You will need to restart those apps after registering.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button id="btn-mcp-register" class="btn btn-primary btn-sm">Register with AI Clients</button>
+                <button id="btn-mcp-copy-config" class="btn btn-secondary btn-sm">Copy Config JSON</button>
+              </div>
+              <div id="mcp-register-result" style="display:none;margin-top:12px;font-size:12px;line-height:1.8;padding:10px 12px;background:var(--bg-tertiary);border-radius:6px;border:1px solid var(--border)"></div>
+            </section>
+          </div>
+
+          <!-- Developer -->
+          <div class="settings-panel" id="settings-tab-developer">
+            <section class="settings-section">
+              <h3 class="settings-section-title">Debug &amp; Diagnostics</h3>
+              <div class="settings-debug-toggle-row">
+                <label class="settings-toggle-label" for="toggle-debug-logging">
+                  Enable debug logging
+                  <span class="settings-toggle-hint">Logs app activity to a file. Share with the developer when reporting issues.</span>
+                </label>
+                <label class="settings-toggle">
+                  <input type="checkbox" id="toggle-debug-logging">
+                  <span class="settings-toggle-track"></span>
+                </label>
+              </div>
+              <div id="debug-log-panel" class="debug-log-panel hidden">
+                <div class="debug-log-toolbar">
+                  <span id="debug-log-meta" class="debug-log-meta">No entries yet</span>
+                  <div class="debug-log-actions">
+                    <button id="btn-debug-refresh" class="btn btn-sm btn-secondary">Refresh</button>
+                    <button id="btn-debug-copy" class="btn btn-sm btn-secondary">Copy All</button>
+                    <button id="btn-debug-show-file" class="btn btn-sm btn-secondary">Show in Finder</button>
+                    <button id="btn-debug-clear" class="btn btn-sm btn-danger">Clear</button>
+                  </div>
+                </div>
+                <div id="debug-log-path" class="debug-log-path"></div>
+                <pre id="debug-log-content" class="debug-log-content">No log entries yet.</pre>
+              </div>
+            </section>
+          </div>
+
+        </div><!-- /.settings-panels -->
+      </div><!-- /.settings-layout -->
 
       <div class="settings-footer">
         <span id="settings-status" class="settings-status"></span>

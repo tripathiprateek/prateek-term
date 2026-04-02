@@ -19,6 +19,9 @@ const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
 
+// MCP HTTP bridge — exposes running sessions to AI clients via localhost
+const bridge = require('./http-bridge');
+
 // Pure utility functions — kept in a separate module so they can be unit-tested
 // without requiring Electron.
 const {
@@ -426,6 +429,9 @@ app.whenReady().then(() => {
   installQuickActionIfNeeded();
   createWindow();
 
+  // Start MCP bridge if user has enabled it in settings
+  startBridgeIfEnabled();
+
   // Check for updates on startup (5s delay so window is fully rendered first)
   // and then every 6 hours. Errors are silent.
   setTimeout(() => checkForUpdates(), 5000);
@@ -533,6 +539,8 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     if (mainWindow && !mainWindow.isDestroyed() && !term._cwdMute) {
       mainWindow.webContents.send('terminal:data', { id, data });
     }
+    // Feed MCP output buffer (no-op if session is not MCP-managed)
+    bridge.appendOutput(id, data);
   });
 
   // Collect askpass temp scripts to delete when the PTY exits
@@ -660,7 +668,99 @@ ipcMain.handle('settings:save', (event, settings) => {
       console.error('Failed to migrate profiles file:', e);
     }
   }
+  // Start or stop MCP bridge based on updated settings
+  if (settings.mcpEnabled) {
+    if (!bridge.isRunning()) startBridgeIfEnabled();
+  } else {
+    bridge.stop();
+  }
   return true;
+});
+
+ipcMain.handle('mcp:status', () => ({
+  running: bridge.isRunning(),
+  port:    bridge.getPort(),
+}));
+
+// ── MCP auto-registration ────────────────────────────────────────────────────
+// Finds an executable by trying `which` first, then a list of fallback paths.
+function findExec(name, fallbacks = []) {
+  return new Promise((resolve) => {
+    exec(`which ${name}`, (err, stdout) => {
+      if (!err && stdout.trim()) return resolve(stdout.trim());
+      for (const p of fallbacks) {
+        if (fs.existsSync(p)) return resolve(p);
+      }
+      resolve(null);
+    });
+  });
+}
+
+ipcMain.handle('mcp:register', async () => {
+  const serverPath = path.join(app.getAppPath(), 'src', 'mcp', 'server.js');
+  const results = {};
+
+  const [nodePath, claudePath] = await Promise.all([
+    findExec('node', [
+      '/opt/homebrew/bin/node',
+      '/usr/local/bin/node',
+      '/usr/bin/node',
+    ]),
+    findExec('claude', [
+      '/opt/homebrew/bin/claude',
+      '/usr/local/bin/claude',
+      path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
+      path.join(os.homedir(), '.local', 'bin', 'claude'),
+    ]),
+  ]);
+
+  // ── Claude Code ──────────────────────────────────────────────────────────
+  if (!claudePath) {
+    results.claudeCode = { ok: false, message: 'claude CLI not found — install Claude Code first.' };
+  } else if (!nodePath) {
+    results.claudeCode = { ok: false, message: 'node not found — install Node.js first.' };
+  } else {
+    await new Promise((resolve) => {
+      const cmd = `"${claudePath}" mcp add --scope user --transport stdio prateek-term -- "${nodePath}" "${serverPath}"`;
+      exec(cmd, (err, stdout, stderr) => {
+        if (!err) {
+          results.claudeCode = { ok: true, message: 'Registered with Claude Code.' };
+        } else {
+          const msg = (stderr || err.message || '').toLowerCase();
+          if (msg.includes('already') || msg.includes('exists')) {
+            results.claudeCode = { ok: true, message: 'Already registered with Claude Code.' };
+          } else {
+            results.claudeCode = { ok: false, message: stderr || err.message };
+          }
+        }
+        resolve();
+      });
+    });
+  }
+
+  // ── Claude Desktop ───────────────────────────────────────────────────────
+  const desktopCfgPath = path.join(
+    os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'
+  );
+  try {
+    let cfg = {};
+    if (fs.existsSync(desktopCfgPath)) {
+      cfg = JSON.parse(fs.readFileSync(desktopCfgPath, 'utf8'));
+    }
+    cfg.mcpServers = cfg.mcpServers || {};
+    cfg.mcpServers['prateek-term'] = {
+      command: nodePath || 'node',
+      args: [serverPath],
+    };
+    const dir = path.dirname(desktopCfgPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(desktopCfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+    results.claudeDesktop = { ok: true, message: 'Registered with Claude Desktop.' };
+  } catch (e) {
+    results.claudeDesktop = { ok: false, message: e.message };
+  }
+
+  return results;
 });
 
 ipcMain.handle('settings:choose-path', async () => {
@@ -1108,9 +1208,12 @@ ipcMain.handle('serial:connect', (event, { port, baudRate, dataBits, stopBits, p
       }
 
       sp.on('data', (data) => {
+        const str = data.toString('binary');
         if (!event.sender.isDestroyed()) {
-          event.sender.send('serial:data', { id, data: data.toString('binary') });
+          event.sender.send('serial:data', { id, data: str });
         }
+        // Feed MCP output buffer (no-op if session is not MCP-managed)
+        bridge.appendOutput(id, str);
       });
 
       sp.on('close', () => {
@@ -1142,3 +1245,116 @@ ipcMain.on('serial:close', (event, { id }) => {
   if (sp?.isOpen) sp.close();
   serialConnections.delete(id);
 });
+
+// ── MCP Bridge lifecycle helpers ──────────────────────────────────────────────
+
+function buildSSHCommandForProfile(profile) {
+  // If the profile uses a pasted PEM key, write it to a temp file so SSH can use it
+  let resolvedProfile = profile;
+  const cleanupFiles = [];
+  if (profile.pemText && !profile.pemFile) {
+    const keysDir = path.join(app.getPath('userData'), 'temp-keys');
+    if (!fs.existsSync(keysDir)) fs.mkdirSync(keysDir, { recursive: true, mode: 0o700 });
+    const hash = crypto.createHash('sha256').update(profile.pemText).digest('hex').slice(0, 12);
+    const keyPath = path.join(keysDir, `pasted-key-${hash}`);
+    fs.writeFileSync(keyPath, profile.pemText, { mode: 0o600 });
+    resolvedProfile = { ...profile, pemFile: keyPath };
+    cleanupFiles.push(keyPath);
+  }
+
+  if (resolvedProfile.protocol === 'ssh') {
+    const result = buildSSHCommand(resolvedProfile);
+    return { ...result, _cleanupFiles: [...(result._cleanupFiles || []), ...cleanupFiles] };
+  }
+  switch (resolvedProfile.protocol) {
+    case 'telnet': return buildTelnetCommand(resolvedProfile);
+    case 'ftp':    return buildFTPCommand(resolvedProfile);
+    default:       return { command: findShell(), args: ['-l'], env: {}, _cleanupFiles: cleanupFiles };
+  }
+}
+
+function spawnPtyForBridge(options) {
+  const shell    = options.shell || findShell();
+  const args     = options.args  || ['-l'];
+  let   cwd      = process.env.HOME || '/';
+  const env      = { ...process.env, ...(options.env || {}) };
+  env.TERM       = 'xterm-256color';
+  env.COLORTERM  = 'truecolor';
+  if (!env.LANG)   env.LANG   = 'en_US.UTF-8';
+  if (!env.LC_ALL) env.LC_ALL = 'en_US.UTF-8';
+  delete env.SSH_ASKPASS;
+  delete env.SSH_ASKPASS_REQUIRE;
+
+  const id   = ++terminalIdCounter;
+  // Register the output buffer BEFORE spawning so no early PTY data is lost
+  bridge.ensureBuf(id);
+  const term = pty.spawn(shell, args, { name: 'xterm-256color', cols: options.cols || 200, rows: options.rows || 50, cwd, env });
+  terminals.set(id, term);
+
+  term.onData((data) => {
+    bridge.appendOutput(id, data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:data', { id, data });
+    }
+  });
+
+  // Auto-type password for password-auth SSH sessions created via MCP
+  let pwdBuf = '';
+  const pendingPwd = options._pendingPassword || null;
+  if (pendingPwd) {
+    term.onData((data) => {
+      pwdBuf = (pwdBuf + data).slice(-256);
+      if (/password/i.test(pwdBuf)) {
+        pwdBuf = '';
+        setTimeout(() => term.write(pendingPwd + '\r'), 300);
+      }
+    });
+  }
+
+  const cleanupFiles = options._cleanupFiles || [];
+  term.onExit(() => {
+    terminals.delete(id);
+    for (const f of cleanupFiles) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+  });
+
+  return Promise.resolve({ id: String(id) });
+}
+
+function serialConnectForBridge(opts) {
+  return new Promise((resolve, reject) => {
+    const id = `serial-mcp-${Date.now()}`;
+    const sp = new SerialPort({
+      path: opts.port, baudRate: parseInt(opts.baudRate, 10) || 115200,
+      dataBits: parseInt(opts.dataBits, 10) || 8, stopBits: parseFloat(opts.stopBits) || 1,
+      parity: opts.parity || 'none', autoOpen: false,
+    });
+    sp.open((err) => {
+      if (err) return reject(new Error(err.message));
+      sp.on('data', (data) => { bridge.appendOutput(id, data.toString('binary')); });
+      sp.on('close', () => { serialConnections.delete(id); });
+      serialConnections.set(id, sp);
+      resolve({ id });
+    });
+  });
+}
+
+function startBridgeIfEnabled() {
+  const settings = loadSettings();
+  if (!settings.mcpEnabled) return;
+  if (bridge.isRunning()) return;
+  bridge.start({
+    terminals,
+    serialConns:     serialConnections,
+    loadProfiles:    () => loadProfiles(),
+    connectProfile:  (p) => Promise.resolve(buildSSHCommandForProfile(p)),
+    spawnPty:        spawnPtyForBridge,
+    writeInput:      (id, data) => { const t = terminals.get(Number(id)); if (t) t.write(data); },
+    killSession:     (id) => { const t = terminals.get(Number(id)); if (t) { t.kill(); terminals.delete(Number(id)); } },
+    listSerialPorts: () => SerialPort.list(),
+    serialConnect:   serialConnectForBridge,
+    serialWrite:     (id, data) => { const sp = serialConnections.get(id); if (sp?.isOpen) sp.write(Buffer.from(data, 'binary')); },
+    serialClose:     (id) => { const sp = serialConnections.get(id); if (sp?.isOpen) sp.close(); serialConnections.delete(id); },
+    getVersion:      () => app.getVersion(),
+    port:            settings.mcpPort || 29419,
+  });
+}

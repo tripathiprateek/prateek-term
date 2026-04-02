@@ -133,6 +133,10 @@ contextBridge.exposeInMainWorld('terminalAPI', {
     return () => ipcRenderer.removeListener('open-folder', listener);
   },
 
+  // ── MCP bridge ───────────────────────────────────────────────────────────
+  mcpStatus:   () => ipcRenderer.invoke('mcp:status'),
+  mcpRegister: () => ipcRenderer.invoke('mcp:register'),
+
   // ── Auto-update ──────────────────────────────────────────────────────────
   // Check for updates (pass { includePrerelease: true } to include RC/beta)
   checkForUpdates: (opts) => ipcRenderer.invoke('update:check', opts),
