@@ -684,6 +684,36 @@
     .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     @media (max-width: 640px) { .feature-grid { grid-template-columns: 1fr; } .toc ol { grid-template-columns: 1fr; } }
 
+    /* ── Scroll-reveal ── */
+    .section {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+    }
+    .section.in-view {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* 11 — MCP Agent demo */
+    .demo-mcp-agent .mcp-line-1,
+    .demo-mcp-agent .mcp-line-2,
+    .demo-mcp-agent .mcp-line-3,
+    .demo-mcp-agent .mcp-line-4,
+    .demo-mcp-agent .mcp-line-5,
+    .demo-mcp-agent .mcp-line-6 { opacity: 0; }
+    .in-view .demo-mcp-agent .mcp-line-1,
+    .in-view .demo-mcp-agent .mcp-line-2,
+    .in-view .demo-mcp-agent .mcp-line-3,
+    .in-view .demo-mcp-agent .mcp-line-4,
+    .in-view .demo-mcp-agent .mcp-line-5,
+    .in-view .demo-mcp-agent .mcp-line-6 { opacity: 1; }
+
+    .demo-mcp-register .mcp-status-1,
+    .demo-mcp-register .mcp-status-2 { opacity: 0; }
+    .in-view .demo-mcp-register .mcp-status-1,
+    .in-view .demo-mcp-register .mcp-status-2 { opacity: 1; }
+
     /* ── Footer ── */
     .footer {
       margin-top: 80px;
@@ -703,7 +733,7 @@
 <!-- ╚══════════════════════════════╝ -->
 <div class="page-wrap">
   <div class="hero">
-    <div class="hero-badge">User Guide · v1.0</div>
+    <div class="hero-badge">User Guide · v1.1</div>
     <h1>Prateek-Term</h1>
     <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
   </div>
@@ -722,6 +752,7 @@
       <li><a href="#sel-action">Add Selection as Action</a></li>
       <li><a href="#import-export">Import &amp; Export</a></li>
       <li><a href="#settings">Settings &amp; Themes</a></li>
+      <li><a href="#mcp">AI / MCP Integration</a></li>
     </ol>
   </nav>
 
@@ -1279,34 +1310,49 @@
     <p class="section-intro">Customise the look and behaviour of Prateek-Term via the Settings panel (<kbd>⌘,</kbd>).</p>
 
     <div class="feature-card demo-settings">
-      <div class="feature-demo" style="flex-direction:column; gap:16px; align-items:flex-start;">
-        <!-- Settings cards -->
-        <div class="mock-settings-card settings-card">
-          <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Colour Theme</div>
-          <div class="mock-theme-swatches">
-            <div class="mock-theme-swatch active theme-swatch-active" style="background:#1e1e2e;" title="Catppuccin Mocha"></div>
-            <div class="mock-theme-swatch" style="background:#1c1c1c;" title="One Dark Pro"></div>
-            <div class="mock-theme-swatch" style="background:#002b36;" title="Solarized Dark"></div>
-            <div class="mock-theme-swatch" style="background:#292d3e;" title="Material Ocean"></div>
-            <div class="mock-theme-swatch" style="background:#0d1117;" title="GitHub Dark"></div>
-            <div class="mock-theme-swatch" style="background:#011627;" title="Night Owl"></div>
+      <div class="feature-demo" style="min-height:280px;">
+        <div class="mock-window" style="max-width:580px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Settings</div>
           </div>
-          <div style="font-size:11px; color:#7f849c;">Applies instantly to UI and all open terminals.</div>
-        </div>
-        <div class="mock-settings-card settings-card" style="animation-delay:0.7s;">
-          <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Connection Storage</div>
-          <div class="mock-settings-row">
-            <div class="mock-input" style="flex:1; font-size:11px; color:#7f849c;">~/Library/…/connection-profiles.json</div>
-            <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px; flex-shrink:0;">Browse…</div>
+          <div class="mock-layout" style="min-height:240px;">
+            <!-- Sidebar nav tabs -->
+            <div class="mock-sidebar" style="width:140px; gap:2px;">
+              <div class="mock-profile-item selected" style="font-size:12px; font-weight:600; color:#cdd6f4; background:rgba(137,180,250,0.1); border-radius:8px; padding:7px 10px;">General</div>
+              <div class="mock-profile-item" style="font-size:12px; padding:7px 10px; animation:slideInLeft 0.3s 0.4s both;">Appearance</div>
+              <div class="mock-profile-item" style="font-size:12px; padding:7px 10px; animation:slideInLeft 0.3s 0.6s both;">Data</div>
+              <div class="mock-profile-item" style="font-size:12px; padding:7px 10px; color:#cba6f7; animation:slideInLeft 0.3s 0.8s both;">AI/MCP</div>
+              <div class="mock-profile-item" style="font-size:12px; padding:7px 10px; animation:slideInLeft 0.3s 1.0s both;">Developer</div>
+            </div>
+            <!-- Right pane: General settings content -->
+            <div class="mock-form" style="padding:14px; gap:12px;">
+              <div class="mock-settings-card settings-card" style="max-width:none;">
+                <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Colour Theme</div>
+                <div class="mock-theme-swatches">
+                  <div class="mock-theme-swatch active theme-swatch-active" style="background:#1e1e2e;" title="Catppuccin Mocha"></div>
+                  <div class="mock-theme-swatch" style="background:#1c1c1c;" title="One Dark Pro"></div>
+                  <div class="mock-theme-swatch" style="background:#002b36;" title="Solarized Dark"></div>
+                  <div class="mock-theme-swatch" style="background:#292d3e;" title="Material Ocean"></div>
+                  <div class="mock-theme-swatch" style="background:#0d1117;" title="GitHub Dark"></div>
+                  <div class="mock-theme-swatch" style="background:#011627;" title="Night Owl"></div>
+                </div>
+              </div>
+              <div class="mock-settings-card settings-card" style="max-width:none; animation-delay:0.7s;">
+                <div class="mock-settings-row">
+                  <div class="mock-settings-label">Enable debug logging</div>
+                  <div class="mock-toggle on"></div>
+                </div>
+              </div>
+              <div class="mock-settings-card settings-card" style="max-width:none; animation-delay:1.0s;">
+                <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Connection Storage</div>
+                <div class="mock-settings-row">
+                  <div class="mock-input" style="flex:1; font-size:11px; color:#7f849c;">~/Library/…/profiles.json</div>
+                  <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px; flex-shrink:0;">Browse…</div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div style="font-size:11px; color:#7f849c;">Existing hosts are copied to the new location automatically.</div>
-        </div>
-        <div class="mock-settings-card settings-card" style="animation-delay:1.0s;">
-          <div class="mock-settings-row">
-            <div class="mock-settings-label">Enable debug logging</div>
-            <div class="mock-toggle on"></div>
-          </div>
-          <div style="font-size:11px; color:#7f849c;">Logs app activity to a file for bug reporting.</div>
         </div>
       </div>
       <div class="feature-desc">
@@ -1329,12 +1375,106 @@
     </div>
   </div>
 
+  <!-- ════════════════════════════════════════════
+       11 — AI / MCP INTEGRATION
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="mcp">
+    <div class="section-label" style="color:var(--accent-5);">11</div>
+    <h2>AI / MCP Integration</h2>
+    <p class="section-intro">Let AI agents like Claude control your terminal sessions through the Model Context Protocol. Connect to SSH devices, run commands, and read output — all programmatically.</p>
+
+    <!-- Feature 1: AI Agent controlling terminal -->
+    <div class="feature-card demo-mcp-agent">
+      <div class="feature-demo" style="min-height:220px;">
+        <div class="mock-window" style="max-width:560px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">MCP Bridge</div>
+          </div>
+          <div class="mock-terminal" style="min-height:180px; position:relative;">
+            <div style="position:absolute; top:8px; right:12px; font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#cba6f7; background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); padding:2px 8px; border-radius:12px;">AI Agent</div>
+            <div class="mcp-line-1" style="animation:fadeUp 0.4s 0.4s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">connect</span> <span style="color:#cdd6f4;">{profileName: "prod-server"}</span></div>
+            <div class="mcp-line-2" style="animation:fadeUp 0.4s 0.9s both;"><span style="color:#a6e3a1;">&#10003;</span> <span style="color:#7f849c;">session_id:</span> <span style="color:#cdd6f4;">"s_8f3a…"</span></div>
+            <div class="mcp-line-3" style="animation:fadeUp 0.4s 1.4s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">run_command</span> <span style="color:#cdd6f4;">"uname -a"</span></div>
+            <div class="mcp-line-4" style="animation:slideInRight 0.5s 2.0s both;"><span class="mock-out">Linux ip-172-31-65-169 6.1.0 #1 SMP x86_64 GNU/Linux</span></div>
+            <div class="mcp-line-5" style="animation:fadeUp 0.4s 2.6s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">run_command</span> <span style="color:#cdd6f4;">"df -h /"</span></div>
+            <div class="mcp-line-6" style="animation:slideInRight 0.5s 3.2s both;"><span class="mock-out">/dev/xvda1  20G  8.1G  12G  41% /</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Programmatic terminal control</h3>
+        <p>AI agents connect to saved profiles, run commands, and read output through the MCP bridge. Every tool call maps to a real terminal session inside Prateek-Term.</p>
+      </div>
+    </div>
+
+    <!-- Feature 2: Register with AI Clients -->
+    <div class="feature-card demo-mcp-register">
+      <div class="feature-demo" style="min-height:200px; flex-direction:column; gap:16px;">
+        <div class="mock-window" style="max-width:420px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Settings — AI/MCP</div>
+          </div>
+          <div class="mock-form" style="padding:14px; gap:12px;">
+            <div class="mock-settings-row">
+              <div class="mock-settings-label">MCP Server</div>
+              <div class="mock-toggle on"></div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <div class="mock-btn primary mcp-register-btn" style="background:#cba6f7; animation:pulseGlow 1.8s 0.8s infinite;">Register with AI Clients</div>
+            </div>
+            <div class="mcp-status-1" style="display:flex; align-items:center; gap:6px; font-size:12px; animation:slideInRight 0.4s 1.6s both;">
+              <span style="color:#a6e3a1;">&#10003;</span>
+              <span style="color:#cdd6f4;">Claude Code:</span>
+              <span style="color:#a6e3a1;">registered</span>
+            </div>
+            <div class="mcp-status-2" style="display:flex; align-items:center; gap:6px; font-size:12px; animation:slideInRight 0.4s 2.0s both;">
+              <span style="color:#a6e3a1;">&#10003;</span>
+              <span style="color:#cdd6f4;">Claude Desktop:</span>
+              <span style="color:#a6e3a1;">config updated</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>One-click registration</h3>
+        <p>Click <strong>Register with AI Clients</strong> and Prateek-Term writes its MCP config into Claude Code and Claude Desktop automatically — no manual JSON editing.</p>
+        <ul class="steps">
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">1</span>Enable MCP in Settings &#8594; <strong>AI/MCP</strong> tab.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">2</span>Click <strong>Register with AI Clients</strong> to auto-configure Claude.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">3</span>Start a new Claude session — prateek-term tools appear automatically.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">4</span>Tag any profile as <strong>"ai"</strong> to make it accessible to AI agents.</li>
+        </ul>
+        <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
+          <span class="tip-icon">🔒</span>
+          <p><strong>Security:</strong> Only profiles tagged <strong>"ai"</strong> are visible to AI agents. Credentials are never exposed — the bridge resolves connections internally.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Footer ── -->
   <div class="footer">
-    <p>Prateek-Term v1.0.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p>Prateek-Term v1.1.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
     <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
   </div>
 
 </div><!-- .page-wrap -->
+
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('in-view');
+        e.target.querySelectorAll('[style*="animation"]').forEach(el => {
+          el.style.animationPlayState = 'running';
+        });
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.section').forEach(s => observer.observe(s));
+</script>
 </body>
 </html>
