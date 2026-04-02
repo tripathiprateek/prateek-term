@@ -73,7 +73,22 @@ jobs:
         # Use --publish never so electron-builder does NOT try to push to GitHub
         # Releases itself — the separate `release` job handles that with proper
         # structured release notes.
-        run: npm run prebuild && npx electron-builder --mac --arm64 --publish never
+        # Retry up to 3 times — hdiutil resize can fail intermittently on GHA runners
+        run: |
+          npm run prebuild
+          for attempt in 1 2 3; do
+            echo "Build attempt $attempt..."
+            if npx electron-builder --mac --arm64 --publish never; then
+              echo "Build succeeded on attempt $attempt"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Build failed after 3 attempts"
+              exit 1
+            fi
+            echo "Build failed, retrying in 10s..."
+            sleep 10
+          done
         env:
           SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
           # Prevent electron-builder from searching for a Developer ID cert.
