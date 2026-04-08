@@ -161,6 +161,10 @@ function buildCommonSSHFlags(profile) {
 
   if (profile.pemFile) {
     flags.push('-i', profile.pemFile);
+    // IdentitiesOnly=yes forces SSH to ONLY use the specified key file —
+    // skip ssh-agent lookup entirely. Prevents auth failures when the MCP
+    // server process (spawned by Claude.app) has no SSH_AUTH_SOCK.
+    flags.push('-o', 'IdentitiesOnly=yes');
   }
 
   if (profile.compression) flags.push('-C');

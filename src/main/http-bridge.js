@@ -85,9 +85,10 @@ function appendOutput(id, data) {
 
 function stripAnsi(str) {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*[mGKHF]/g, '')
-    .replace(/\x1b\][^\x07]*\x07/g, '')
-    .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, '');
+  return str.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')  // CSI sequences (includes ?2004h/l bracket paste)
+    .replace(/\x1b\][^\x07]*\x07/g, '')               // OSC sequences
+    .replace(/\x1b[()][0-9A-B]/g, '')                  // character set sequences
+    .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, '');        // control characters
 }
 
 // Wait until the session buffer contains a shell prompt ($, #, >) or timeout.
@@ -124,7 +125,14 @@ function waitForDone(id, marker, timeoutMs) {
     const timer = setTimeout(() => {
       const pos = entry.waiters.indexOf(w);
       if (pos !== -1) entry.waiters.splice(pos, 1);
-      reject(new Error('run_command timed out'));
+      // Check if the process is waiting for input (password, confirmation, etc.)
+      const inputPromptRe = /(?:password|passphrase|yes\/no|continue connecting|Enter|confirm).*[:?]\s*$/im;
+      const bufTail = entry.buf.slice(-512);
+      if (inputPromptRe.test(bufTail)) {
+        resolve({ output: stripAnsi(entry.buf), exitCode: -1, status: 'waiting_for_input', prompt: bufTail.match(inputPromptRe)[0].trim() });
+      } else {
+        reject(new Error('run_command timed out'));
+      }
     }, timeoutMs);
     const w = {
       marker,
@@ -137,10 +145,18 @@ function waitForDone(id, marker, timeoutMs) {
 
 // ── HTTP router helpers ─────────────────────────────────────────────────────
 
+const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk) => { data += chunk; });
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error('Request body too large'));
+      }
+    });
     req.on('end', () => {
       try { resolve(JSON.parse(data || '{}')); }
       catch { resolve({}); }
@@ -154,21 +170,84 @@ function send(res, status, body) {
   res.end(json);
 }
 
-function route(method, pattern, url) {
-  // pattern like '/sessions/:id/run' → match and extract params
-  const patParts = pattern.split('/');
-  const urlParts = url.split('/');
-  if (patParts.length !== urlParts.length) return null;
-  if (req_method !== method) return null;
-  const params = {};
-  for (let i = 0; i < patParts.length; i++) {
-    if (patParts[i].startsWith(':')) {
-      params[patParts[i].slice(1)] = decodeURIComponent(urlParts[i]);
-    } else if (patParts[i] !== urlParts[i]) {
-      return null;
-    }
+function validateLocalPath(localPath) {
+  const resolved = path.resolve(localPath);
+  const home = os.homedir();
+  if (!resolved.startsWith(home) && !resolved.startsWith('/tmp')) {
+    return 'localPath must be within home directory or /tmp';
   }
-  return params;
+  return null;
+}
+
+function resolveAiProfile(profileName) {
+  const all = _loadProfiles();
+  const profile = all.find(p => p.name === profileName);
+  if (!profile) return { status: 404, error: `Profile '${profileName}' not found` };
+  const isAi = Array.isArray(profile.tags) && profile.tags.some(t => (t.name || t) === 'ai');
+  if (!isAi) return { status: 403, error: 'Profile not tagged as ai-accessible' };
+  if (profile.protocol !== 'ssh') return { status: 400, error: 'File transfer only supports SSH profiles' };
+  return { profile };
+}
+
+async function runScpTransfer(profile, scpTargets, timeout_ms) {
+  const scpArgs = ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-O'];
+  const cleanupFiles = [];
+
+  try {
+    if (profile.pemFile) {
+      scpArgs.push('-i', profile.pemFile);
+    } else if (profile.pemText) {
+      const keysDir = path.join(os.tmpdir(), 'prateek-term-keys');
+      if (!fs.existsSync(keysDir)) fs.mkdirSync(keysDir, { recursive: true, mode: 0o700 });
+      const hash = crypto.createHash('sha256').update(profile.pemText).digest('hex').slice(0, 12);
+      const keyPath = path.join(keysDir, `scp-key-${hash}`);
+      fs.writeFileSync(keyPath, profile.pemText, { mode: 0o600 });
+      scpArgs.push('-i', keyPath);
+      cleanupFiles.push(keyPath);
+    }
+
+    if (profile.port && profile.port !== 22) scpArgs.push('-P', String(profile.port));
+    scpArgs.push(...scpTargets);
+
+    const shellQuote = (a) => `'${a.replace(/'/g, "'\\''")}'`;
+    let cmd;
+    if (profile.password && !profile.pemFile && !profile.pemText) {
+      const pwPath = path.join(os.tmpdir(), `prateek-term-pw-${crypto.randomBytes(4).toString('hex')}`);
+      fs.writeFileSync(pwPath, profile.password, { mode: 0o600 });
+      cleanupFiles.push(pwPath);
+      // Use full path to sshpass — Electron's PATH may not include Homebrew
+      const sshpassBin = ['/opt/homebrew/bin/sshpass', '/usr/local/bin/sshpass', '/usr/bin/sshpass']
+        .find(p => fs.existsSync(p)) || 'sshpass';
+      cmd = `${sshpassBin} -f '${pwPath}' scp ${scpArgs.map(shellQuote).join(' ')}`;
+    } else {
+      cmd = `scp ${scpArgs.map(shellQuote).join(' ')}`;
+    }
+
+    const result = await _spawnPty({ shell: '/bin/bash', args: ['-c', cmd], cols: 200, rows: 50, _cleanupFiles: [] });
+    const scpSessionId = result.id;
+    ensureBuf(scpSessionId);
+
+    const timeoutMs = Math.min(timeout_ms || 120000, 300000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    const startTime = Date.now();
+    let scpOutput = '';
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const entry = outputBuffers.get(scpSessionId);
+      if (entry) scpOutput = entry.buf;
+      if (!_terminals.has(Number(scpSessionId))) break;
+    }
+
+    const entry = outputBuffers.get(scpSessionId);
+    if (entry) scpOutput = stripAnsi(entry.buf);
+    if (_terminals.has(Number(scpSessionId))) _killSession(scpSessionId);
+    outputBuffers.delete(scpSessionId);
+
+    return { output: scpOutput };
+  } finally {
+    for (const f of cleanupFiles) { try { fs.unlinkSync(f); } catch { /* already gone */ } }
+  }
 }
 
 // ── Bridge state (injected from main.js) ───────────────────────────────────
@@ -192,10 +271,7 @@ let _port   = 29419;
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
-let req_method = '';
-
 async function handleRequest(req, res) {
-  req_method = req.method;
   const url = req.url.split('?')[0].replace(/\/$/, '') || '/';
 
   // Health — no auth
@@ -279,6 +355,45 @@ async function handleRequest(req, res) {
         ensureBuf(sessionId);
         // Wait for shell prompt (up to 15s) so run_command works immediately after connect
         await waitForPrompt(sessionId, 15000);
+
+        // Log the PTY output after prompt wait — helps diagnose auth failures
+        const postConnectBuf = ensureBuf(sessionId).buf;
+        if (profile && profile.protocol === 'ssh') {
+          const authFailed = /permission denied|authentication fail|no more authentication|connection refused|connection closed|connection reset/i.test(postConnectBuf);
+          if (authFailed) {
+            console.error(`[MCP bridge] SSH auth failed for ${profile.host}:`, postConnectBuf.slice(-500));
+            return send(res, 500, { error: `SSH authentication failed for ${profile.host}. Check profile credentials and key configuration.` });
+          }
+          console.log(`[MCP bridge] SSH connect to ${profile.host} — buffer (last 200): ${postConnectBuf.slice(-200).replace(/\n/g, '\\n')}`);
+        }
+
+        // For SSH profiles, verify we landed on the remote by running hostname
+        if (profile && profile.protocol === 'ssh' && profile.host) {
+          try {
+            const marker = `${DONE_PREFIX}${crypto.randomBytes(4).toString('hex')}:`;
+            const wrapped = `hostname ; printf '${marker}%d${DONE_SUFFIX}' $?\r`;
+            _writeInput(sessionId, wrapped);
+            const hostResult = await waitForDone(sessionId, marker, 5000);
+            const remoteHost = hostResult.output.trim().split('\n').pop().trim();
+            // Detect if we're still on the local machine (SSH may have failed silently)
+            const localHostname = os.hostname();
+            if (remoteHost === localHostname || remoteHost.startsWith(localHostname.split('.')[0])) {
+              return send(res, 500, {
+                error: `SSH connection failed — session landed on local machine (${remoteHost}) instead of ${profile.host}. Check the profile credentials.`,
+                id: sessionId,
+              });
+            }
+            return send(res, 201, {
+              id: sessionId,
+              host: profile.host,
+              remoteHostname: remoteHost,
+              protocol: profile.protocol,
+            });
+          } catch {
+            // Hostname check failed — still return session but warn
+            return send(res, 201, { id: sessionId, host: profile.host, protocol: profile.protocol, warning: 'Could not verify remote hostname' });
+          }
+        }
       }
       return send(res, 201, { id: sessionId });
     } catch (e) {
@@ -313,7 +428,7 @@ async function handleRequest(req, res) {
     if (!outputBuffers.has(id)) return send(res, 404, { error: 'Session not found' });
     const body = await readBody(req);
     const data = body.data || '';
-    if (_terminals.has(id)) _writeInput(id, data);
+    if (_terminals.has(Number(id))) _writeInput(id, data);
     else if (_serialConns.has(id)) _serialWrite(id, data);
     return send(res, 200, { ok: true });
   }
@@ -334,10 +449,73 @@ async function handleRequest(req, res) {
   if (delParams) {
     const { id } = delParams;
     if (!outputBuffers.has(id)) return send(res, 404, { error: 'Session not found' });
-    if (_terminals.has(id)) _killSession(id);
+    if (_terminals.has(Number(id))) _killSession(id);
     else if (_serialConns.has(id)) _serialClose(id);
     outputBuffers.delete(id);
     return send(res, 200, { ok: true });
+  }
+
+  // ── GET /sessions/:id/status ──────────────────────────────────────────
+  const statusParams = matchRoute('GET', '/sessions/:id/status', url, req.method);
+  if (statusParams) {
+    const { id } = statusParams;
+    if (!outputBuffers.has(id)) return send(res, 404, { error: 'Session not found' });
+    const entry = outputBuffers.get(id);
+    const alive = _terminals.has(Number(id)) || _serialConns.has(id);
+    const bufTail = entry.buf.slice(-512);
+    const inputPromptRe = /(?:password|passphrase|yes\/no|continue connecting|Enter|confirm).*[:?]\s*$/im;
+    const shellPromptRe = /[$#>]\s*$/m;
+    let state = 'unknown';
+    let prompt = null;
+    if (!alive) {
+      state = 'disconnected';
+    } else if (inputPromptRe.test(bufTail)) {
+      state = 'waiting_for_input';
+      prompt = bufTail.match(inputPromptRe)[0].trim();
+    } else if (entry.waiters.length > 0) {
+      state = 'running_command';
+    } else if (shellPromptRe.test(bufTail)) {
+      state = 'idle';
+    } else {
+      state = 'busy';
+    }
+    return send(res, 200, { id, state, alive, prompt, pendingCommands: entry.waiters.length });
+  }
+
+  // ── POST /upload ──────────────────────────────────────────────────────
+  if (req.method === 'POST' && url === '/upload') {
+    const body = await readBody(req);
+    const { profileName, localPath, remotePath, timeout_ms } = body;
+    if (!localPath || !remotePath) return send(res, 400, { error: 'localPath and remotePath are required' });
+    if (!profileName) return send(res, 400, { error: 'profileName is required' });
+    const profileErr = resolveAiProfile(profileName);
+    if (profileErr.error) return send(res, profileErr.status, { error: profileErr.error });
+    const pathErr = validateLocalPath(localPath);
+    if (pathErr) return send(res, 403, { error: pathErr });
+    if (!fs.existsSync(localPath)) return send(res, 400, { error: `Local file not found: ${localPath}` });
+    const profile = profileErr.profile;
+    const userHost = profile.username ? `${profile.username}@${profile.host}` : profile.host;
+    const result = await runScpTransfer(profile, [localPath, `${userHost}:${remotePath}`], timeout_ms);
+    const failed = /permission denied|no such file|connection refused|lost connection/i.test(result.output);
+    return send(res, failed ? 500 : 200, { ok: !failed, output: result.output });
+  }
+
+  // ── POST /download ────────────────────────────────────────────────────
+  if (req.method === 'POST' && url === '/download') {
+    const body = await readBody(req);
+    const { profileName, remotePath, localPath, timeout_ms } = body;
+    if (!remotePath || !localPath) return send(res, 400, { error: 'remotePath and localPath are required' });
+    if (!profileName) return send(res, 400, { error: 'profileName is required' });
+    const pathErr = validateLocalPath(localPath);
+    if (pathErr) return send(res, 403, { error: pathErr });
+    const profileErr = resolveAiProfile(profileName);
+    if (profileErr.error) return send(res, profileErr.status, { error: profileErr.error });
+    const profile = profileErr.profile;
+    const userHost = profile.username ? `${profile.username}@${profile.host}` : profile.host;
+    const result = await runScpTransfer(profile, [`${userHost}:${remotePath}`, localPath], timeout_ms);
+    const failed = /permission denied|no such file|connection refused|lost connection/i.test(result.output);
+    const fileExists = !failed && fs.existsSync(localPath);
+    return send(res, failed ? 500 : 200, { ok: fileExists, output: result.output });
   }
 
   send(res, 404, { error: 'Not found' });
@@ -393,7 +571,7 @@ function start(opts) {
   _serialWrite     = opts.serialWrite;
   _serialClose     = opts.serialClose;
   _getVersion      = opts.getVersion;
-  _port            = opts.port || 29419;
+  _port            = opts.port != null ? opts.port : 29419;
   _token           = getOrCreateToken();
 
   _server = http.createServer((req, res) => {
@@ -403,6 +581,7 @@ function start(opts) {
   });
 
   _server.listen(_port, '127.0.0.1', () => {
+    _port = _server.address().port; // update to actual bound port (needed when port is 0)
     console.log(`[MCP bridge] listening on 127.0.0.1:${_port}`);
   });
 

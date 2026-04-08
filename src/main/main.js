@@ -304,7 +304,7 @@ function createNewWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 500,
-    title: 'Prateek-Term',
+    title: `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#1e1e2e',
     icon: nativeImage.createFromPath(iconPath),
@@ -315,6 +315,9 @@ function createNewWindow() {
     },
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // Force native title bar to show version after page load overrides it
+  const versionTitle = `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`;
+  win.webContents.on('did-finish-load', () => win.setTitle(versionTitle));
   // Block Cmd+R — reloading kills all open terminal sessions
   win.webContents.on('before-input-event', (event, input) => {
     if (input.meta && input.key === 'r') event.preventDefault();
@@ -406,6 +409,10 @@ app.whenReady().then(() => {
       label: 'Help',
       submenu: [
         {
+          label: 'User Guide',
+          click: () => openUserGuide(),
+        },
+        {
           label: 'Check for Updates…',
           click: () => checkForUpdates(),
         },
@@ -443,6 +450,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
+  if (!app.isReady()) return; // guard against early activate before app is ready
   const wins = BrowserWindow.getAllWindows();
   if (wins.length === 0) {
     createWindow();
@@ -532,6 +540,9 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   }
 
   terminals.set(id, term);
+  // Register with the MCP bridge so UI-opened sessions are visible to AI agents
+  // via list_sessions, and can be adopted with run_command / send_input.
+  bridge.ensureBuf(id);
 
   term.onData((data) => {
     // term._cwdMute is set during getRemoteCwd probes to suppress the
@@ -539,7 +550,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     if (mainWindow && !mainWindow.isDestroyed() && !term._cwdMute) {
       mainWindow.webContents.send('terminal:data', { id, data });
     }
-    // Feed MCP output buffer (no-op if session is not MCP-managed)
+    // Feed MCP output buffer so AI agents can read output / detect prompts
     bridge.appendOutput(id, data);
   });
 
@@ -686,7 +697,7 @@ ipcMain.handle('mcp:status', () => ({
 // Finds an executable by trying `which` first, then a list of fallback paths.
 function findExec(name, fallbacks = []) {
   return new Promise((resolve) => {
-    exec(`which ${name}`, (err, stdout) => {
+    require('child_process').execFile('/usr/bin/which', [name], (err, stdout) => {
       if (!err && stdout.trim()) return resolve(stdout.trim());
       for (const p of fallbacks) {
         if (fs.existsSync(p)) return resolve(p);
@@ -697,7 +708,33 @@ function findExec(name, fallbacks = []) {
 }
 
 ipcMain.handle('mcp:register', async () => {
-  const serverPath = path.join(app.getAppPath(), 'src', 'mcp', 'server.js');
+  // When packaged, node_modules are inside the asar and can't be loaded by external Node.
+  // Solution: copy server.js to ~/.prateek-term/mcp/ and install its deps there.
+  let serverPath;
+  if (app.isPackaged) {
+    const mcpDir = path.join(os.homedir(), '.prateek-term', 'mcp');
+    if (!fs.existsSync(mcpDir)) fs.mkdirSync(mcpDir, { recursive: true });
+    const srcServer = path.join(app.getAppPath().replace('app.asar', 'app.asar.unpacked'), 'src', 'mcp', 'server.js');
+    const destServer = path.join(mcpDir, 'server.js');
+    fs.copyFileSync(srcServer, destServer);
+    // Install MCP SDK if not present
+    const destPkg = path.join(mcpDir, 'package.json');
+    if (!fs.existsSync(destPkg)) {
+      fs.writeFileSync(destPkg, JSON.stringify({ name: 'prateek-term-mcp', private: true, dependencies: { '@modelcontextprotocol/sdk': '*' } }));
+    }
+    const nodeModules = path.join(mcpDir, 'node_modules', '@modelcontextprotocol');
+    if (!fs.existsSync(nodeModules)) {
+      const { execSync } = require('child_process');
+      try {
+        execSync('npm install --production', { cwd: mcpDir, timeout: 60000, stdio: 'pipe' });
+      } catch (e) {
+        console.error('[MCP register] npm install failed:', e.message);
+      }
+    }
+    serverPath = destServer;
+  } else {
+    serverPath = path.join(app.getAppPath(), 'src', 'mcp', 'server.js');
+  }
   const results = {};
 
   const [nodePath, claudePath] = await Promise.all([
@@ -906,6 +943,33 @@ ipcMain.handle('actions:import', async () => {
   }
 });
 
+// ── User Guide window ────────────────────────────────────────────────────
+let userGuideWindow = null;
+function openUserGuide() {
+  if (userGuideWindow && !userGuideWindow.isDestroyed()) {
+    userGuideWindow.focus();
+    return;
+  }
+  userGuideWindow = new BrowserWindow({
+    width: 1020,
+    height: 860,
+    minWidth: 700,
+    minHeight: 500,
+    title: 'Prateek-Term — User Guide',
+    backgroundColor: '#1e1e2e',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  // In dev: docs/ is at project root. When packaged: extraResources puts it in Resources/docs/
+  const guidePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'docs', 'user-guide.html')
+    : path.join(__dirname, '../../docs/user-guide.html');
+  userGuideWindow.loadFile(guidePath);
+  userGuideWindow.on('closed', () => { userGuideWindow = null; });
+}
+
 // ── Help window ──────────────────────────────────────────────────────────
 let helpWindow = null;
 ipcMain.handle('help:open', () => {
@@ -1023,7 +1087,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   const transferId = ++scpTransferId;
   const senderContents = event.sender; // send events back to originating window
 
-  const flags = [];
+  const flags = ['-O']; // Force legacy SCP protocol — many embedded devices lack SFTP subsystem
 
   // Recursive flag for directories
   let isDirectory = false;
@@ -1264,12 +1328,16 @@ function buildSSHCommandForProfile(profile) {
 
   if (resolvedProfile.protocol === 'ssh') {
     const result = buildSSHCommand(resolvedProfile);
-    return { ...result, _cleanupFiles: [...(result._cleanupFiles || []), ...cleanupFiles] };
+    const cmd = { ...result, _cleanupFiles: [...(result._cleanupFiles || []), ...cleanupFiles] };
+    dbgLog(`[MCP bridge] SSH command: ${cmd.command} ${cmd.args.join(' ')}`);
+    return cmd;
   }
-  switch (resolvedProfile.protocol) {
+  switch ((resolvedProfile.protocol || '').toLowerCase()) {
     case 'telnet': return buildTelnetCommand(resolvedProfile);
     case 'ftp':    return buildFTPCommand(resolvedProfile);
-    default:       return { command: findShell(), args: ['-l'], env: {}, _cleanupFiles: cleanupFiles };
+    default:
+      console.warn(`[MCP bridge] non-SSH protocol "${resolvedProfile.protocol}" — falling back to local shell`);
+      return { command: findShell(), args: ['-l'], env: {}, _cleanupFiles: cleanupFiles };
   }
 }
 
@@ -1282,8 +1350,20 @@ function spawnPtyForBridge(options) {
   env.COLORTERM  = 'truecolor';
   if (!env.LANG)   env.LANG   = 'en_US.UTF-8';
   if (!env.LC_ALL) env.LC_ALL = 'en_US.UTF-8';
+  // Ensure SSH can find the agent socket (Electron launched from Dock may strip it)
+  if (!env.SSH_AUTH_SOCK) {
+    try {
+      const tmpDir = '/private/tmp';
+      const launchdDirs = fs.readdirSync(tmpDir).filter(d => d.startsWith('com.apple.launchd.'));
+      for (const d of launchdDirs) {
+        const sock = path.join(tmpDir, d, 'Listeners');
+        if (fs.existsSync(sock)) { env.SSH_AUTH_SOCK = sock; break; }
+      }
+    } catch { /* no agent — IdentitiesOnly=yes on key profiles will handle this */ }
+  }
   delete env.SSH_ASKPASS;
   delete env.SSH_ASKPASS_REQUIRE;
+  dbgLog(`[MCP bridge] spawnPtyForBridge: shell=${shell} args=[${args.join(', ')}] SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK || 'unset'}`);
 
   const id   = ++terminalIdCounter;
   // Register the output buffer BEFORE spawning so no early PTY data is lost

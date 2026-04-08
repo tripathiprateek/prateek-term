@@ -1409,7 +1409,64 @@
       </div>
     </div>
 
-    <!-- Feature 2: Register with AI Clients -->
+    <!-- Feature 2: File Upload via SCP -->
+    <div class="feature-card demo-mcp-upload">
+      <div class="feature-demo" style="min-height:220px;">
+        <div class="mock-window" style="max-width:560px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">MCP Bridge — File Transfer</div>
+          </div>
+          <div class="mock-terminal" style="min-height:180px; position:relative;">
+            <div style="position:absolute; top:8px; right:12px; font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#cba6f7; background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); padding:2px 8px; border-radius:12px;">AI Agent</div>
+            <div style="animation:fadeUp 0.4s 0.4s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">upload_file</span></div>
+            <div style="animation:fadeUp 0.4s 0.8s both; padding-left:16px;"><span style="color:#7f849c;">profileName:</span> <span style="color:#cdd6f4;">"edge-gateway"</span></div>
+            <div style="animation:fadeUp 0.4s 1.2s both; padding-left:16px;"><span style="color:#7f849c;">localPath:</span> <span style="color:#cdd6f4;">"/tmp/firmware-v2.4.bin"</span></div>
+            <div style="animation:fadeUp 0.4s 1.6s both; padding-left:16px;"><span style="color:#7f849c;">remotePath:</span> <span style="color:#cdd6f4;">"/opt/firmware/"</span></div>
+            <div style="animation:slideInRight 0.5s 2.2s both; display:flex; align-items:center; gap:8px; margin-top:6px;">
+              <span style="color:#a6e3a1;">&#10003;</span>
+              <span class="mock-out">transferred 4.2 MB via SCP</span>
+            </div>
+            <div style="animation:fadeUp 0.4s 2.8s both; margin-top:10px; display:flex; align-items:center; justify-content:center; gap:12px;">
+              <span style="background:rgba(137,180,250,0.15); border:1px solid rgba(137,180,250,0.3); color:#89b4fa; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:600;">Mac</span>
+              <span style="color:#7f849c; font-size:11px;">&#8594; SCP &#8594;</span>
+              <span style="background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); color:#cba6f7; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:600;">Remote Device</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>File transfer to remote devices</h3>
+        <p>AI agents can push firmware, config files, or scripts to remote devices over SCP — using the same saved profiles and credentials that power your SSH sessions.</p>
+      </div>
+    </div>
+
+    <!-- Feature 3: Session Status -->
+    <div class="feature-card demo-mcp-status">
+      <div class="feature-demo" style="min-height:180px;">
+        <div class="mock-window" style="max-width:560px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">MCP Bridge — Status</div>
+          </div>
+          <div class="mock-terminal" style="min-height:140px; position:relative;">
+            <div style="position:absolute; top:8px; right:12px; font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#cba6f7; background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); padding:2px 8px; border-radius:12px;">AI Agent</div>
+            <div style="animation:fadeUp 0.4s 0.4s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">get_status</span> <span style="color:#cdd6f4;">{session_id: "s_8f3a…"}</span></div>
+            <div style="animation:slideInRight 0.5s 1.0s both; margin-top:4px;">
+              <span style="color:#7f849c;">state:</span> <span style="color:#f9e2af;">waiting_for_input</span>
+            </div>
+            <div style="animation:fadeUp 0.4s 1.6s both; margin-top:8px;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">send_input</span> <span style="color:#cdd6f4;">"yes\r"</span></div>
+            <div style="animation:slideInRight 0.5s 2.2s both;"><span style="color:#a6e3a1;">&#10003;</span> <span class="mock-out">input sent</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Session state awareness</h3>
+        <p>Agents call <strong>get_status</strong> to check whether a session is <code style="color:#f9e2af;">idle</code>, <code style="color:#a6e3a1;">running_command</code>, <code style="color:#cba6f7;">waiting_for_input</code>, or <code style="color:#f38ba8;">disconnected</code> — enabling smarter decisions about when to send commands or wait.</p>
+      </div>
+    </div>
+
+    <!-- Feature 4: Register with AI Clients -->
     <div class="feature-card demo-mcp-register">
       <div class="feature-demo" style="min-height:200px; flex-direction:column; gap:16px;">
         <div class="mock-window" style="max-width:420px;">
@@ -1450,6 +1507,51 @@
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">🔒</span>
           <p><strong>Security:</strong> Only profiles tagged <strong>"ai"</strong> are visible to AI agents. Credentials are never exposed — the bridge resolves connections internally.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Available MCP Tools -->
+    <div class="feature-card">
+      <div class="feature-desc" style="padding:20px 24px 24px;">
+        <h3>Available MCP tools</h3>
+        <p style="margin-bottom:14px;">The full set of tools exposed to AI agents through the MCP bridge:</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">connect</span><span style="color:var(--text-muted);">Open a session via saved profile</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">disconnect</span><span style="color:var(--text-muted);">Close a session</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">run_command</span><span style="color:var(--text-muted);">Execute a shell command</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">send_input</span><span style="color:var(--text-muted);">Send raw input (prompts, Ctrl+C)</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">read_output</span><span style="color:var(--text-muted);">Read buffered terminal output</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">get_status</span><span style="color:var(--text-muted);">Check session state</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">upload_file</span><span style="color:var(--text-muted);">Upload files via SCP</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">download_file</span><span style="color:var(--text-muted);">Download files via SCP</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_profiles</span><span style="color:var(--text-muted);">List AI-accessible profiles</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_sessions</span><span style="color:var(--text-muted);">List active sessions</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_serial_ports</span><span style="color:var(--text-muted);">Discover serial devices</span></div>
+        </div>
+        <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
+          <span class="tip-icon">&#128161;</span>
+          <p><strong>Tip:</strong> Use <strong>upload_file</strong> to push firmware or config files to embedded devices. Combine with <strong>run_command</strong> to verify the transfer and trigger an install — all in a single AI workflow.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MCP Improvements -->
+    <div class="feature-card">
+      <div class="feature-desc" style="padding:20px 24px 24px;">
+        <h3>Under the hood</h3>
+        <p style="margin-bottom:14px;">Recent improvements to the MCP bridge that make AI-driven workflows more robust:</p>
+        <ul class="steps">
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>connect</strong> verifies the remote hostname and returns it in the response, so the agent can confirm it reached the right host.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>run_command</strong> detects blocking prompts (password, yes/no) and returns a <code style="color:#f9e2af;">waiting_for_input</code> status instead of timing out.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>get_status</strong> reports session state: <code style="color:#f9e2af;">idle</code>, <code style="color:#a6e3a1;">running_command</code>, <code style="color:#cba6f7;">waiting_for_input</code>, or <code style="color:#f38ba8;">disconnected</code>.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>upload_file</strong> and <strong>download_file</strong> transfer files via SCP using the saved profile credentials.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>send_input</strong> delivers raw bytes directly to the PTY for reliable prompt handling.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>Path safety</strong> — local file paths are restricted to <code>$HOME</code> and <code>/tmp</code> to prevent unintended access.</li>
+        </ul>
+        <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
+          <span class="tip-icon">&#128268;</span>
+          <p><strong>Standalone server:</strong> When registered via the Settings panel, Prateek-Term copies the MCP server to <code>~/.prateek-term/mcp/</code> with its own dependencies, ensuring it works independently of the app bundle.</p>
         </div>
       </div>
     </div>

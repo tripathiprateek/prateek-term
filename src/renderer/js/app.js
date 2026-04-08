@@ -3406,6 +3406,16 @@ async function init() {
     window.terminalAPI.onAutoConnect((profile) => quickConnect(profile));
     window.terminalAPI.rendererReady();   // flush any buffered open-folder URLs
     setupUpdateBanner();
+    // Set window title with version and build number
+    try {
+      const vInfo = await window.terminalAPI.getVersionInfo();
+      if (vInfo) {
+        const titleText = `Prateek-Term v${vInfo.version} (${vInfo.buildNum})`;
+        document.title = titleText;
+        const appNameEl = document.querySelector('.titlebar-app-name');
+        if (appNameEl) appNameEl.textContent = titleText;
+      }
+    } catch { /* non-critical */ }
   } catch (err) {
     console.error('Failed to initialize:', err);
   }

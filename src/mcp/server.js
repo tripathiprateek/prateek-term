@@ -13,12 +13,12 @@
  * Claude Code:     .mcp.json (project) or ~/.claude/mcp.json (global)
  */
 
-const { Server }               = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport }  = require('@modelcontextprotocol/sdk/server/stdio.js');
-const {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-} = require('@modelcontextprotocol/sdk/types.js');
+// Use direct CJS paths — the SDK exports map doesn't reliably resolve with
+// require() across all Node versions (esp. when running outside the asar).
+const sdkBase = require.resolve('@modelcontextprotocol/sdk/server').replace(/server[/\\]index\.js$/, '');
+const { Server }                = require(sdkBase + 'server/index.js');
+const { StdioServerTransport }  = require(sdkBase + 'server/stdio.js');
+const { ListToolsRequestSchema, CallToolRequestSchema } = require(sdkBase + 'types.js');
 const http  = require('http');
 const path  = require('path');
 const fs    = require('fs');
@@ -189,6 +189,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'get_status',
+      description: 'Get the current state of a session: idle (at shell prompt), running_command, waiting_for_input (password/confirmation prompt), busy, or disconnected.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Session ID.' },
+        },
+        required: ['session_id'],
+      },
+    },
+    {
+      name: 'upload_file',
+      description: 'Upload a local file to a remote device via SCP. Uses the saved profile credentials (password or key). The file is transferred from the Mac to the remote host.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          profileName: { type: 'string', description: 'Name of a saved AI-accessible SSH profile.' },
+          localPath:   { type: 'string', description: 'Absolute path to the local file on the Mac.' },
+          remotePath:  { type: 'string', description: 'Destination path on the remote device (e.g. /tmp/file.ipk).' },
+          timeout_ms:  { type: 'number', description: 'Max wait time in ms (default: 120000, max: 300000).' },
+        },
+        required: ['profileName', 'localPath', 'remotePath'],
+      },
+    },
+    {
+      name: 'download_file',
+      description: 'Download a file from a remote device to the local Mac via SCP. Uses the saved profile credentials.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          profileName: { type: 'string', description: 'Name of a saved AI-accessible SSH profile.' },
+          remotePath:  { type: 'string', description: 'Path to the file on the remote device.' },
+          localPath:   { type: 'string', description: 'Destination path on the local Mac.' },
+          timeout_ms:  { type: 'number', description: 'Max wait time in ms (default: 120000, max: 300000).' },
+        },
+        required: ['profileName', 'remotePath', 'localPath'],
+      },
+    },
+    {
       name: 'list_serial_ports',
       description: 'List available serial ports on the machine.',
       inputSchema: { type: 'object', properties: {}, required: [] },
@@ -200,6 +239,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
+
+  // Validate session_id for tools that use it — prevent path traversal in URL construction
+  const SESSION_TOOLS = ['run_command', 'send_input', 'read_output', 'disconnect', 'get_status'];
+  if (SESSION_TOOLS.includes(name) && args.session_id) {
+    if (!/^\d+$/.test(String(args.session_id))) {
+      return { content: [{ type: 'text', text: 'Error: session_id must be a numeric string' }], isError: true };
+    }
+  }
 
   try {
     switch (name) {
@@ -229,14 +276,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.port)        body.port        = args.port;
         if (args.baudRate)    body.baudRate    = args.baudRate;
         const result = await bridgeRequest('POST', '/sessions', body);
-        return textResult(`Session opened. ID: ${result.id}\nUse run_command with session_id="${result.id}" to execute commands.`);
+        let msg = `Session opened. ID: ${result.id}`;
+        if (result.remoteHostname) msg += `\nConnected to: ${result.remoteHostname} (${result.host})`;
+        else if (result.host) msg += `\nTarget: ${result.host}`;
+        if (result.warning) msg += `\nWarning: ${result.warning}`;
+        msg += `\nUse run_command with session_id="${result.id}" to execute commands.`;
+        return textResult(msg);
       }
 
       case 'run_command': {
         const { session_id, command, timeout_ms } = args;
         const body = { command };
-        if (timeout_ms) body.timeout_ms = timeout_ms;
+        if (timeout_ms) body.timeout_ms = Math.max(1000, Math.min(Number(timeout_ms) || 30000, 120000));
         const result = await bridgeRequest('POST', `/sessions/${session_id}/run`, body);
+        if (result.status === 'waiting_for_input') {
+          return textResult(`Status: waiting_for_input\nPrompt: ${result.prompt}\n\nThe command is blocked waiting for input. Use send_input to provide a response.\n\nOutput so far:\n${result.output || '(no output)'}`);
+        }
         const out = result.output || '(no output)';
         return textResult(`Exit code: ${result.exitCode}\n\nOutput:\n${out}`);
       }
@@ -257,6 +312,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { session_id } = args;
         await bridgeRequest('DELETE', `/sessions/${session_id}`);
         return textResult(`Session ${session_id} closed.`);
+      }
+
+      case 'get_status': {
+        const { session_id } = args;
+        const result = await bridgeRequest('GET', `/sessions/${session_id}/status`);
+        let msg = `Session ${session_id}: ${result.state}`;
+        if (result.prompt) msg += `\nPrompt: ${result.prompt}`;
+        if (result.pendingCommands > 0) msg += `\nPending commands: ${result.pendingCommands}`;
+        if (!result.alive) msg += '\n(Session process has exited)';
+        return textResult(msg);
+      }
+
+      case 'upload_file': {
+        const { profileName, localPath, remotePath, timeout_ms } = args;
+        const clampedTimeout = timeout_ms ? Math.max(5000, Math.min(Number(timeout_ms) || 120000, 300000)) : undefined;
+        const result = await bridgeRequest('POST', '/upload', { profileName, localPath, remotePath, timeout_ms: clampedTimeout });
+        if (result.ok) {
+          return textResult(`File uploaded successfully.\n${localPath} → ${profileName}:${remotePath}\n\nOutput:\n${result.output || '(no output)'}`);
+        }
+        return textResult(`Upload failed.\n\nOutput:\n${result.output || '(no output)'}`);
+      }
+
+      case 'download_file': {
+        const { profileName, remotePath, localPath, timeout_ms } = args;
+        const clampedTimeout = timeout_ms ? Math.max(5000, Math.min(Number(timeout_ms) || 120000, 300000)) : undefined;
+        const result = await bridgeRequest('POST', '/download', { profileName, remotePath, localPath, timeout_ms: clampedTimeout });
+        if (result.ok) {
+          return textResult(`File downloaded successfully.\n${profileName}:${remotePath} → ${localPath}\n\nOutput:\n${result.output || '(no output)'}`);
+        }
+        return textResult(`Download failed.\n\nOutput:\n${result.output || '(no output)'}`);
       }
 
       case 'list_serial_ports': {
