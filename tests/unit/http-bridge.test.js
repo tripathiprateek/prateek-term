@@ -569,18 +569,18 @@ describe('http-bridge — path traversal guard on download', () => {
   });
 });
 
-describe('http-bridge — pager prevention in run_command', () => {
-  test('source sets PAGER=cat and SYSTEMD_PAGER=cat to prevent less/more blocking', () => {
+describe('http-bridge — pager prevention via PTY env', () => {
+  test('source sets PAGER, SYSTEMD_PAGER, GIT_PAGER env vars on PTY spawn', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../src/main/http-bridge.js'), 'utf8');
-    expect(src).toContain('PAGER=cat');
-    expect(src).toContain('SYSTEMD_PAGER=cat');
-    expect(src).toContain('GIT_PAGER=cat');
+    // Pager env vars are set on the PTY environment, not prepended to commands
+    expect(src).toContain("PAGER: 'cat'");
+    expect(src).toContain("SYSTEMD_PAGER: 'cat'");
+    expect(src).toContain("GIT_PAGER: 'cat'");
   });
 
-  test('noPager prefix is applied to the wrapped command in run_command handler', () => {
+  test('run_command does NOT prepend PAGER vars to the command string', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../src/main/http-bridge.js'), 'utf8');
-    // The wrapped command should include noPager prefix before the user command
-    expect(src).toContain('${noPager}${cmd}');
+    expect(src).not.toContain('${noPager}${cmd}');
   });
 });
 

@@ -345,7 +345,7 @@ async function handleRequest(req, res) {
         const result  = await _spawnPty({
           shell: cmdInfo.command,
           args:  cmdInfo.args,
-          env:   cmdInfo.env || {},
+          env:   { ...cmdInfo.env, PAGER: 'cat', SYSTEMD_PAGER: 'cat', GIT_PAGER: 'cat', LESS: '' },
           cols:  200,
           rows:  50,
           _cleanupFiles: cmdInfo._cleanupFiles || [],
@@ -411,10 +411,7 @@ async function handleRequest(req, res) {
     const timeoutMs = Math.min(body.timeout_ms || 30000, 120000);
     // Unique marker so concurrent calls don't collide
     const marker = `${DONE_PREFIX}${crypto.randomBytes(4).toString('hex')}:`;
-    // Disable pagers (less, more) that would block the PTY waiting for keystrokes.
-    // systemctl, git, man etc. all honour these env vars.
-    const noPager = 'PAGER=cat SYSTEMD_PAGER=cat GIT_PAGER=cat LESS= ';
-    const wrapped = `${noPager}${cmd} ; printf '${marker}%d${DONE_SUFFIX}' $?\r`;
+    const wrapped = `${cmd} ; printf '${marker}%d${DONE_SUFFIX}' $?\r`;
     _writeInput(id, wrapped);
     try {
       const result = await waitForDone(id, marker, timeoutMs);

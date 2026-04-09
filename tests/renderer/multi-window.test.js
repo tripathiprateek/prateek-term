@@ -91,7 +91,10 @@ describe('Tab tear-off drag (BUG-008)', () => {
   });
 
   test('calls openNewWindow with the connection profile on tear-off', () => {
-    expect(appSource).toContain('openNewWindow(tab.connectionProfile)');
+    // profile is tab.connectionProfile OR a local fallback for tabs with no profile
+    expect(appSource).toContain('openNewWindow(profile)');
+    // Local tabs get a fallback profile so new window opens a terminal
+    expect(appSource).toContain("tab.connectionProfile || { protocol: 'local'");
   });
 
   test('closes the source tab after tearing off', () => {

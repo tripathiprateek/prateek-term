@@ -754,7 +754,7 @@ async function createTab(options = {}) {
     let extraEnv = {};
 
     let cleanupFiles = [];
-    if (options.connectionProfile) {
+    if (options.connectionProfile && options.connectionProfile.protocol !== 'local') {
       const commandInfo = await window.terminalAPI.connect(options.connectionProfile);
       shellCommand  = commandInfo.command;
       shellArgs     = commandInfo.args;
@@ -1121,7 +1121,7 @@ function renderTab(tab) {
 
   // Drag tab downward to tear it off into a new window
   tabEl.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || !tab.connectionProfile) return;
+    if (e.button !== 0) return;
     e.preventDefault();
 
     const DRAG_START_PX = 8;
@@ -1165,7 +1165,11 @@ function renderTab(tab) {
       if (tearOff) {
         ev.stopPropagation();
         ev.preventDefault();
-        await window.terminalAPI.openNewWindow(tab.connectionProfile);
+        // For tabs with a connection profile (SSH/Serial), pass the profile so
+        // the new window auto-connects. For local tabs, pass a minimal local
+        // profile so the new window opens a fresh terminal instead of empty state.
+        const profile = tab.connectionProfile || { protocol: 'local', name: tab.name || 'Terminal' };
+        await window.terminalAPI.openNewWindow(profile);
         closeTab(tab.id);
       }
     };

@@ -483,6 +483,9 @@ function findShell() {
 }
 
 ipcMain.handle('terminal:create', (event, options = {}) => {
+  // Capture the webContents that created this terminal so data is routed to
+  // the correct window — torn-off windows must NOT have data sent to mainWindow.
+  const ownerContents = event.sender;
   const id = ++terminalIdCounter;
   const shell = options.shell || findShell();
   // Use -l (login shell) by default so ~/.bash_profile / ~/.zprofile are sourced
@@ -547,8 +550,8 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   term.onData((data) => {
     // term._cwdMute is set during getRemoteCwd probes to suppress the
     // probe command and its output from appearing in the terminal view.
-    if (mainWindow && !mainWindow.isDestroyed() && !term._cwdMute) {
-      mainWindow.webContents.send('terminal:data', { id, data });
+    if (!ownerContents.isDestroyed() && !term._cwdMute) {
+      ownerContents.send('terminal:data', { id, data });
     }
     // Feed MCP output buffer so AI agents can read output / detect prompts
     bridge.appendOutput(id, data);
@@ -563,8 +566,8 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     for (const f of cleanupFiles) {
       try { fs.unlinkSync(f); } catch { /* already gone */ }
     }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal:exit', { id, exitCode, signal });
+    if (!ownerContents.isDestroyed()) {
+      ownerContents.send('terminal:exit', { id, exitCode, signal });
     }
   });
 
