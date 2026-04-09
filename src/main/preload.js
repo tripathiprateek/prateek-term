@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   resizeTerminal: (id, cols, rows) =>
     ipcRenderer.send('terminal:resize', { id, cols, rows }),
   killTerminal: (id) => ipcRenderer.send('terminal:kill', { id }),
+  adoptTerminal: (id) => ipcRenderer.invoke('terminal:adopt', id),
   onTerminalData: (callback) => {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on('terminal:data', listener);

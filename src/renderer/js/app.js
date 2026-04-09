@@ -1165,12 +1165,19 @@ function renderTab(tab) {
       if (tearOff) {
         ev.stopPropagation();
         ev.preventDefault();
-        // For tabs with a connection profile (SSH/Serial), pass the profile so
-        // the new window auto-connects. For local tabs, pass a minimal local
-        // profile so the new window opens a fresh terminal instead of empty state.
+        // Pass the live ptyId so the new window can adopt the existing PTY
+        // instead of reconnecting. For local tabs with no profile, use a minimal one.
         const profile = tab.connectionProfile || { protocol: 'local', name: tab.name || 'Terminal' };
-        await window.terminalAPI.openNewWindow(profile);
-        closeTab(tab.id);
+        const tearOffData = {
+          _tearOff: true,
+          ptyId: tab.ptyId,
+          protocol: tab.protocol,
+          name: tab.name,
+          connectionProfile: profile,
+        };
+        await window.terminalAPI.openNewWindow(tearOffData);
+        // Detach without killing the PTY — the new window will adopt it
+        detachTab(tab.id);
       }
     };
 
@@ -1223,6 +1230,40 @@ function closeTab(tabId) {
   } else if (tab.ptyId) {
     window.terminalAPI.killTerminal(tab.ptyId);
   }
+
+  if (tab.resizeObserver) {
+    tab.resizeObserver.disconnect();
+  }
+  tab.term.dispose();
+  tab.pane.remove();
+
+  const tabEl = document.querySelector(`.tab[data-tab-id="${tabId}"]`);
+  if (tabEl) tabEl.remove();
+
+  state.tabs.splice(index, 1);
+
+  if (state.activeTabId === tabId) {
+    if (state.tabs.length > 0) {
+      const newIndex = Math.min(index, state.tabs.length - 1);
+      activateTab(state.tabs[newIndex].id);
+    } else {
+      state.activeTabId = null;
+      showEmptyState();
+    }
+  }
+}
+
+function detachTab(tabId) {
+  const index = state.tabs.findIndex((t) => t.id === tabId);
+  if (index === -1) return;
+  const tab = state.tabs[index];
+
+  if (tab.logId) {
+    window.terminalAPI.logStop(tab.logId);
+    tab.logId = null;
+  }
+  // Clear ptyId so no more input is sent, but do NOT kill — new window adopts it
+  tab.ptyId = null;
 
   if (tab.resizeObserver) {
     tab.resizeObserver.disconnect();
@@ -1920,7 +1961,106 @@ function renderSidebarHosts() {
   });
 }
 
+async function adoptTab(tearOffData) {
+  removeEmptyState();
+  const { ptyId, protocol, name, connectionProfile } = tearOffData;
+
+  const tabId = ++tabIdCounter;
+  const pane = document.createElement('div');
+  pane.className = 'terminal-pane';
+  pane.id = `terminal-pane-${tabId}`;
+  dom.terminalContainer.appendChild(pane);
+
+  const filterBar = document.createElement('div');
+  filterBar.className = 'serial-filter-bar hidden';
+  pane.appendChild(filterBar);
+
+  const viewport = document.createElement('div');
+  viewport.className = 'terminal-viewport';
+  pane.appendChild(viewport);
+
+  const { term, fitAddon, searchAddon } = createTerminalInstance();
+  term.open(viewport);
+
+  const tab = {
+    id: tabId,
+    ptyId,
+    serialId: null,
+    isSerial: false,
+    protocol: protocol || 'local',
+    name: name || 'Terminal',
+    term,
+    fitAddon,
+    searchAddon,
+    pane,
+    filterBar,
+    connectionProfile: connectionProfile || null,
+    activeTransferId: null,
+    filterActive: false,
+    filterPattern: '',
+    filterIsRegex: false,
+    filterLineBuffer: '',
+    filterMatchCount: 0,
+    filterTotalCount: 0,
+    _filterRegex: null,
+  };
+
+  // Take ownership of the PTY — main process will now route data here
+  await window.terminalAPI.adoptTerminal(ptyId);
+
+  // Wire input
+  term.onData((data) => {
+    if (tab.ptyId) window.terminalAPI.sendInput(tab.ptyId, data);
+  });
+
+  // Clipboard shortcuts
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown') return true;
+    if (e.metaKey && e.key === 'c') {
+      if (term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+        return false;
+      }
+      return true;
+    }
+    if (e.metaKey && e.key === 'v') return false;
+    return true;
+  });
+
+  // Fit to new window size
+  const proposed = fitAddon.proposeDimensions();
+  if (proposed && proposed.cols > 0) {
+    term.resize(proposed.cols, proposed.rows);
+    window.terminalAPI.resizeTerminal(ptyId, proposed.cols, proposed.rows);
+  }
+
+  state.tabs.push(tab);
+  flushPendingTerminalEvents(tab);
+  renderTab(tab);
+  activateTab(tabId);
+
+  const resizeObserver = new ResizeObserver(() => {
+    if (state.activeTabId === tabId) {
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        if (tab.ptyId) {
+          window.terminalAPI.resizeTerminal(tab.ptyId, term.cols, term.rows);
+        }
+      });
+    }
+  });
+  resizeObserver.observe(pane);
+  tab.resizeObserver = resizeObserver;
+
+  term.writeln('\x1b[90m[session moved to this window]\x1b[0m');
+}
+
 async function quickConnect(profile) {
+  // Tear-off: adopt an existing live PTY instead of spawning a new connection
+  if (profile._tearOff && profile.ptyId) {
+    await adoptTab(profile);
+    return;
+  }
   removeEmptyState();
 
   // If profile has pasted key text, save to temp file

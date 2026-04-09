@@ -90,15 +90,17 @@ describe('Tab tear-off drag (BUG-008)', () => {
     expect(appSource).toMatch(/removeEventListener\('mouseup'[\s\S]{0,50}OPTS/);
   });
 
-  test('calls openNewWindow with the connection profile on tear-off', () => {
-    // profile is tab.connectionProfile OR a local fallback for tabs with no profile
-    expect(appSource).toContain('openNewWindow(profile)');
+  test('calls openNewWindow with tear-off data (including ptyId) on tear-off', () => {
+    // Tear-off now passes a tearOffData object with _tearOff flag and ptyId
+    // so the new window can adopt the live PTY instead of reconnecting.
+    expect(appSource).toContain('openNewWindow(tearOffData)');
     // Local tabs get a fallback profile so new window opens a terminal
     expect(appSource).toContain("tab.connectionProfile || { protocol: 'local'");
   });
 
-  test('closes the source tab after tearing off', () => {
-    const tearOffBlock = appSource.match(/openNewWindow[\s\S]{0,200}closeTab/);
+  test('detaches (not closes) the source tab after tearing off', () => {
+    // detachTab removes the tab UI without killing the PTY; new window adopts it
+    const tearOffBlock = appSource.match(/openNewWindow[\s\S]{0,200}detachTab/);
     expect(tearOffBlock).not.toBeNull();
   });
 });

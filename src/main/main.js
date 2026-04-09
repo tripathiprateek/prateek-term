@@ -264,6 +264,7 @@ function installQuickActionIfNeeded() {
 
 let mainWindow;
 const terminals = new Map();
+const terminalOwners = new Map(); // ptyId -> webContents
 let terminalIdCounter = 0;
 const scpTransfers = new Map();
 let scpTransferId = 0;
@@ -543,6 +544,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   }
 
   terminals.set(id, term);
+  terminalOwners.set(id, ownerContents);
   // Register with the MCP bridge so UI-opened sessions are visible to AI agents
   // via list_sessions, and can be adopted with run_command / send_input.
   bridge.ensureBuf(id);
@@ -550,8 +552,9 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   term.onData((data) => {
     // term._cwdMute is set during getRemoteCwd probes to suppress the
     // probe command and its output from appearing in the terminal view.
-    if (!ownerContents.isDestroyed() && !term._cwdMute) {
-      ownerContents.send('terminal:data', { id, data });
+    const owner = terminalOwners.get(id);
+    if (owner && !owner.isDestroyed() && !term._cwdMute) {
+      owner.send('terminal:data', { id, data });
     }
     // Feed MCP output buffer so AI agents can read output / detect prompts
     bridge.appendOutput(id, data);
@@ -561,18 +564,27 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const cleanupFiles = options._cleanupFiles || [];
 
   term.onExit(({ exitCode, signal }) => {
+    const owner = terminalOwners.get(id);
     terminals.delete(id);
+    terminalOwners.delete(id);
     // Clean up SSH_ASKPASS helper scripts written by wrapWithAskpass
     for (const f of cleanupFiles) {
       try { fs.unlinkSync(f); } catch { /* already gone */ }
     }
-    if (!ownerContents.isDestroyed()) {
-      ownerContents.send('terminal:exit', { id, exitCode, signal });
+    if (owner && !owner.isDestroyed()) {
+      owner.send('terminal:exit', { id, exitCode, signal });
     }
   });
 
   const debugCmd = [shell, ...args].join(' ');
   return { id, debugCmd };
+});
+
+// Re-route terminal data to the new owner window (used by tab tear-off)
+ipcMain.handle('terminal:adopt', (event, id) => {
+  if (!terminals.has(id)) return { success: false };
+  terminalOwners.set(id, event.sender);
+  return { success: true };
 });
 
 ipcMain.on('terminal:input', (event, { id, data }) => {
