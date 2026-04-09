@@ -1,6 +1,6 @@
 Polyform Noncommercial License 1.0.0
 
-Copyright (c) 2026 Prateek Tripathi (dabcouk@gmail.com)
+Copyright (c) 2026 Prateek Tripathi (tripathiprateek@gmail.com)
 https://polyformproject.org/licenses/noncommercial/1.0.0
 
 Acceptance
@@ -26,7 +26,7 @@ permission from the copyright holder:
   - Incorporating the Software into a commercial product
   - Using the Software internally at a for-profit company beyond evaluation
 
-To request commercial use permission, contact: dabcouk@gmail.com
+To request commercial use permission, contact: tripathiprateek@gmail.com
 
 Patent License
 
@@ -45,7 +45,28 @@ You must:
      include a visible credit in the application's About screen, documentation,
      or equivalent acknowledgement section that reads:
 
-       "Based on Prateek-Term by Prateek Tripathi (dabcouk@gmail.com)"
+       "Based on Prateek-Term by Prateek Tripathi (tripathiprateek@gmail.com)"
+
+Trademark
+
+"Prateek-Term" and associated logos are trademarks of the licensor. You may not
+use these marks in any derivative work, product name, marketing material, or
+domain name without prior written permission. Forks must be distributed under a
+distinctly different name.
+
+Anti-Circumvention
+
+You may not:
+
+  1. Strip, alter, or obscure this license, any copyright notice, or the
+     attribution requirement from the Software or any derivative work.
+
+  2. Use technical measures, contractual arrangements, or organizational
+     structure to circumvent the noncommercial restriction (for example,
+     creating a "free" wrapper that feeds into a paid product or service).
+
+  3. Train machine-learning models on the Software's source code for the
+     purpose of generating competing products.
 
 Fair Use
 
