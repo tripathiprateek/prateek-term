@@ -75,13 +75,13 @@ describe('Tab tear-off drag (BUG-008)', () => {
     // addEventListener. The variable definition and the call may be ~15 lines apart.
     // Accept either inline or variable-based pattern.
     const hasInline   = /addEventListener\('mousemove'[\s\S]{0,200}capture:\s*true/.test(appSource);
-    const hasVariable = /capture:\s*true[\s\S]{0,1200}addEventListener\('mousemove'/.test(appSource);
+    const hasVariable = /capture:\s*true[\s\S]{0,2000}addEventListener\('mousemove'/.test(appSource);
     expect(hasInline || hasVariable).toBe(true);
   });
 
   test('uses capture: true on document mouseup listener', () => {
     const hasInline   = /addEventListener\('mouseup'[\s\S]{0,200}capture:\s*true/.test(appSource);
-    const hasVariable = /capture:\s*true[\s\S]{0,1200}addEventListener\('mouseup'/.test(appSource);
+    const hasVariable = /capture:\s*true[\s\S]{0,2000}addEventListener\('mouseup'/.test(appSource);
     expect(hasInline || hasVariable).toBe(true);
   });
 

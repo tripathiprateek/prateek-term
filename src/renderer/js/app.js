@@ -556,6 +556,7 @@ async function loadXtermModules() {
   await loadScript('../../node_modules/@xterm/addon-fit/lib/addon-fit.js');
   await loadScript('../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js');
   await loadScript('../../node_modules/@xterm/addon-search/lib/addon-search.js');
+  await loadScript('../../node_modules/@xterm/addon-serialize/lib/addon-serialize.js');
 }
 
 function createTerminalInstance() {
@@ -1165,6 +1166,16 @@ function renderTab(tab) {
       if (tearOff) {
         ev.stopPropagation();
         ev.preventDefault();
+        // Serialize the terminal buffer so the new window can replay history.
+        // SerializeAddon preserves ANSI colors/styles — requires the addon to be loaded.
+        let serializedBuffer = '';
+        try {
+          const serializeAddon = new SerializeAddon.SerializeAddon();
+          tab.term.loadAddon(serializeAddon);
+          serializedBuffer = serializeAddon.serialize();
+          serializeAddon.dispose();
+        } catch { /* addon not available — new window starts blank */ }
+
         // Pass the live ptyId so the new window can adopt the existing PTY
         // instead of reconnecting. For local tabs with no profile, use a minimal one.
         const profile = tab.connectionProfile || { protocol: 'local', name: tab.name || 'Terminal' };
@@ -1174,6 +1185,7 @@ function renderTab(tab) {
           protocol: tab.protocol,
           name: tab.name,
           connectionProfile: profile,
+          serializedBuffer,
         };
         await window.terminalAPI.openNewWindow(tearOffData);
         // Detach without killing the PTY — the new window will adopt it
@@ -2004,6 +2016,13 @@ async function adoptTab(tearOffData) {
     filterTotalCount: 0,
     _filterRegex: null,
   };
+
+  // Replay serialized buffer so history is preserved in the new window
+  if (tearOffData.serializedBuffer) {
+    try {
+      term.write(tearOffData.serializedBuffer);
+    } catch { /* ignore replay errors */ }
+  }
 
   // Take ownership of the PTY — main process will now route data here
   await window.terminalAPI.adoptTerminal(ptyId);
