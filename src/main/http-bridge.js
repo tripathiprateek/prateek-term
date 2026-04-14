@@ -268,6 +268,8 @@ let _getVersion      = null; // () => string
 let _token  = null;
 let _server = null;
 let _port   = 29419;
+let _log    = (msg) => console.log('[MCP bridge]', msg);
+let _logErr = (msg) => console.error('[MCP bridge]', msg);
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
@@ -361,10 +363,10 @@ async function handleRequest(req, res) {
         if (profile && profile.protocol === 'ssh') {
           const authFailed = /permission denied|authentication fail|no more authentication|connection refused|connection closed|connection reset/i.test(postConnectBuf);
           if (authFailed) {
-            console.error(`[MCP bridge] SSH auth failed for ${profile.host}:`, postConnectBuf.slice(-500));
+            _logErr(`SSH auth failed for ${profile.host}: ${postConnectBuf.slice(-500)}`);
             return send(res, 500, { error: `SSH authentication failed for ${profile.host}. Check profile credentials and key configuration.` });
           }
-          console.log(`[MCP bridge] SSH connect to ${profile.host} — buffer (last 200): ${postConnectBuf.slice(-200).replace(/\n/g, '\\n')}`);
+          _log(`SSH connect to ${profile.host} — buffer (last 200): ${postConnectBuf.slice(-200).replace(/\n/g, '\\n')}`);
         }
 
         // For SSH profiles, verify we landed on the remote by running hostname
@@ -572,6 +574,8 @@ function start(opts) {
   _serialClose     = opts.serialClose;
   _getVersion      = opts.getVersion;
   _port            = opts.port != null ? opts.port : 29419;
+  if (opts.log)    _log    = opts.log;
+  if (opts.logErr) _logErr = opts.logErr;
   _token           = getOrCreateToken();
 
   _server = http.createServer((req, res) => {
@@ -582,11 +586,11 @@ function start(opts) {
 
   _server.listen(_port, '127.0.0.1', () => {
     _port = _server.address().port; // update to actual bound port (needed when port is 0)
-    console.log(`[MCP bridge] listening on 127.0.0.1:${_port}`);
+    _log(`listening on 127.0.0.1:${_port}`);
   });
 
   _server.on('error', (err) => {
-    console.error('[MCP bridge] server error:', err.message);
+    _logErr(`server error: ${err.message}`);
   });
 }
 
@@ -595,7 +599,7 @@ function stop() {
   _server.close();
   _server = null;
   outputBuffers.clear();
-  console.log('[MCP bridge] stopped');
+  _log('stopped');
 }
 
 function isRunning() {

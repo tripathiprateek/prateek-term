@@ -741,9 +741,11 @@ ipcMain.handle('mcp:register', async () => {
     if (!fs.existsSync(nodeModules)) {
       const { execSync } = require('child_process');
       try {
+        dbgLog(`[MCP] npm install in ${mcpDir}`);
         execSync('npm install --production', { cwd: mcpDir, timeout: 60000, stdio: 'pipe' });
+        dbgLog('[MCP] npm install succeeded');
       } catch (e) {
-        console.error('[MCP register] npm install failed:', e.message);
+        dbgLog(`[MCP ERROR] npm install failed: ${e.message}`);
       }
     }
     serverPath = destServer;
@@ -1351,7 +1353,7 @@ function buildSSHCommandForProfile(profile) {
     case 'telnet': return buildTelnetCommand(resolvedProfile);
     case 'ftp':    return buildFTPCommand(resolvedProfile);
     default:
-      console.warn(`[MCP bridge] non-SSH protocol "${resolvedProfile.protocol}" — falling back to local shell`);
+      dbgLog(`[MCP] non-SSH protocol "${resolvedProfile.protocol}" — falling back to local shell`);
       return { command: findShell(), args: ['-l'], env: {}, _cleanupFiles: cleanupFiles };
   }
 }
@@ -1435,8 +1437,9 @@ function serialConnectForBridge(opts) {
 
 function startBridgeIfEnabled() {
   const settings = loadSettings();
-  if (!settings.mcpEnabled) return;
-  if (bridge.isRunning()) return;
+  if (!settings.mcpEnabled) { dbgLog('[MCP] disabled in settings — bridge not started'); return; }
+  if (bridge.isRunning()) { dbgLog('[MCP] bridge already running'); return; }
+  dbgLog(`[MCP] starting bridge on port ${settings.mcpPort || 29419}`);
   bridge.start({
     terminals,
     serialConns:     serialConnections,
@@ -1451,5 +1454,7 @@ function startBridgeIfEnabled() {
     serialClose:     (id) => { const sp = serialConnections.get(id); if (sp?.isOpen) sp.close(); serialConnections.delete(id); },
     getVersion:      () => app.getVersion(),
     port:            settings.mcpPort || 29419,
+    log:             (msg) => dbgLog(`[MCP] ${msg}`),
+    logErr:          (msg) => dbgLog(`[MCP ERROR] ${msg}`),
   });
 }
