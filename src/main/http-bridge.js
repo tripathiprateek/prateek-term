@@ -8,8 +8,8 @@
  * Security model:
  *  - Binds to 127.0.0.1 only — never externally reachable.
  *  - All endpoints (except /health) require an Authorization: Bearer <token>
- *    header. The token is written to ~/.prateek-term.mcp-token (mode 0600)
- *    on first start and reused across restarts.
+ *    header. The token is written to ~/Library/Application Support/prateek-term/mcp-token
+ *    (mode 0600) on first start and reused across restarts.
  *  - Only profiles tagged "ai" are visible / connectable via the bridge.
  */
 
@@ -19,7 +19,8 @@ const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
 
-const TOKEN_PATH = path.join(os.homedir(), '.prateek-term.mcp-token');
+const TOKEN_PATH = path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+const TOKEN_PATH_LEGACY = path.join(os.homedir(), '.prateek-term.mcp-token');
 const OUTPUT_BUF_MAX = 64 * 1024; // 64 KB ring-buffer per session
 
 // DONE marker injected around run_command to detect completion.
@@ -30,11 +31,21 @@ const DONE_SUFFIX = '_MTERM_END';
 // ── Token management ────────────────────────────────────────────────────────
 
 function getOrCreateToken() {
+  // Migrate legacy token from home dir on first run
+  try {
+    if (!fs.existsSync(TOKEN_PATH) && fs.existsSync(TOKEN_PATH_LEGACY)) {
+      const dir = path.dirname(TOKEN_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.renameSync(TOKEN_PATH_LEGACY, TOKEN_PATH);
+    }
+  } catch { /* ignore migration errors */ }
   try {
     if (fs.existsSync(TOKEN_PATH)) {
       return fs.readFileSync(TOKEN_PATH, 'utf8').trim();
     }
   } catch { /* fall through to create */ }
+  const dir = path.dirname(TOKEN_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const token = crypto.randomBytes(32).toString('hex');
   fs.writeFileSync(TOKEN_PATH, token, { encoding: 'utf8', mode: 0o600 });
   return token;

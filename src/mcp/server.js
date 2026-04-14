@@ -24,20 +24,24 @@ const path  = require('path');
 const fs    = require('fs');
 const os    = require('os');
 
-const PORT       = parseInt(process.env.PRATEEK_TERM_PORT || '29419', 10);
-const TOKEN_PATH = path.join(os.homedir(), '.prateek-term.mcp-token');
+const PORT             = parseInt(process.env.PRATEEK_TERM_PORT || '29419', 10);
+const TOKEN_PATH       = path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+const TOKEN_PATH_LEGACY = path.join(os.homedir(), '.prateek-term.mcp-token');
 
 // ── Bridge HTTP client ───────────────────────────────────────────────────────
 
 function readToken() {
-  try {
-    return fs.readFileSync(TOKEN_PATH, 'utf8').trim();
-  } catch {
+  // Try new path first, fall back to legacy for older installs
+  const p = fs.existsSync(TOKEN_PATH) ? TOKEN_PATH
+          : fs.existsSync(TOKEN_PATH_LEGACY) ? TOKEN_PATH_LEGACY
+          : null;
+  if (!p) {
     throw new Error(
       'Prateek-Term auth token not found. ' +
       'Make sure Prateek-Term is running and MCP is enabled in Settings.'
     );
   }
+  return fs.readFileSync(p, 'utf8').trim();
 }
 
 function bridgeRequest(method, urlPath, body) {
