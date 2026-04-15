@@ -1035,8 +1035,11 @@ function setupPaneDragDrop(pane, tab) {
       profile.pemFile = await window.terminalAPI.saveTempKey(profile.pemText);
     }
 
-    // Detect current remote working directory
-    const remoteCwd = await window.terminalAPI.getRemoteCwd(tab.ptyId);
+    // Use the profile's configured remote path as the upload destination.
+    // Do NOT call getRemoteCwd here — for SSH tabs that returns the LOCAL cwd
+    // of the ssh client process, not the remote server directory.
+    // null → SCP handler defaults to ~/ on the remote host.
+    const remoteCwd = profile.remotePath || null;
 
     tab._uploadProfile   = profile;
     tab._uploadRemoteCwd = remoteCwd;
