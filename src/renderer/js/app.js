@@ -1446,12 +1446,16 @@ async function restoreSession() {
         lastTabId = tab.id;
 
       } else if (profile) {
-        // SSH/Telnet/FTP: show history first, then reconnect
+        // SSH/Telnet/FTP: resolve pemText → temp pemFile (same as quickConnect)
+        const connectionProfile = { ...profile };
+        if (connectionProfile.pemText && !connectionProfile.pemFile) {
+          connectionProfile.pemFile = await window.terminalAPI.saveTempKey(connectionProfile.pemText);
+        }
         await createTab({
           protocol:          saved.protocol,
           name:              saved.name,
-          host:              profile.host,
-          connectionProfile: profile,
+          host:              connectionProfile.host,
+          connectionProfile,
         });
         const tab = state.tabs[state.tabs.length - 1];
         writeScrollbackHistory(tab, saved.scrollback);
@@ -1820,6 +1824,10 @@ async function reconnectTab(tab) {
     } else {
       let shellCommand = null, shellArgs = [], extraEnv = {}, cleanupFiles = [];
       if (tab.connectionProfile) {
+        // Ensure pasted PEM keys have a temp file path (lost on session restore)
+        if (tab.connectionProfile.pemText && !tab.connectionProfile.pemFile) {
+          tab.connectionProfile.pemFile = await window.terminalAPI.saveTempKey(tab.connectionProfile.pemText);
+        }
         const commandInfo = await window.terminalAPI.connect(tab.connectionProfile);
         shellCommand = commandInfo.command;
         shellArgs    = commandInfo.args;
