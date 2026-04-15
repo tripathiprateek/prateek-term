@@ -896,9 +896,6 @@ async function createTab(options = {}) {
         cwdDebounce = setTimeout(checkCwd, 500);
       }
     });
-
-    // One-time initial check to set the name on open
-    checkCwd();
   }
 
   // Auto-copy on selection (PuTTY / Linux terminal style)
