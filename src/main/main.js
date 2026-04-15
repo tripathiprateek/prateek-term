@@ -350,13 +350,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Startup banner — logged once so support logs are self-describing
-  const { version: appVer, buildNum } = getVersionInfo();
-  dbgLog(`=== Prateek-Term ${appVer} (build ${buildNum}) starting ===`);
-  dbgLog(`platform=${process.platform} arch=${process.arch} node=${process.version} electron=${process.versions.electron}`);
-  dbgLog(`os=${os.type()} ${os.release()} | cpus=${os.cpus().length} | mem=${Math.round(os.totalmem()/1024/1024)}MB`);
-  dbgLog(`userData=${app.getPath('userData')} home=${os.homedir()}`);
-
   // Set dock icon in dev mode (macOS ignores BrowserWindow icon)
   const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
   try {
@@ -370,6 +363,12 @@ app.whenReady().then(() => {
   }
 
   const { version, buildNum, channel } = getVersionInfo();
+  // Startup banner — logged once so support logs are self-describing
+  dbgLog(`=== Prateek-Term ${version} (build ${buildNum}) starting ===`);
+  dbgLog(`platform=${process.platform} arch=${process.arch} node=${process.version} electron=${process.versions.electron}`);
+  dbgLog(`os=${os.type()} ${os.release()} | cpus=${os.cpus().length} | mem=${Math.round(os.totalmem()/1024/1024)}MB`);
+  dbgLog(`userData=${app.getPath('userData')} home=${os.homedir()}`);
+
   app.setAboutPanelOptions({
     applicationName: 'Prateek-Term',
     applicationVersion: `${version} — ${channel}`,
