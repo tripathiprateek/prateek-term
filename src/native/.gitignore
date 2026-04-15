@@ -1,0 +1,10 @@
+# Keep only the compiled .node binary; exclude all build intermediates
+build/Makefile
+build/*.mk
+build/*.gypi
+build/gyp-mac-tool
+build/binding.Makefile
+build/Release/.deps/
+build/Release/.forge-meta
+build/Release/obj.target/
+bin/

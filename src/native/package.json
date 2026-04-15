@@ -1,0 +1,10 @@
+{
+  "name": "default_terminal",
+  "version": "1.0.0",
+  "description": "Native macOS addon for default terminal registration",
+  "main": "index.js",
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "gypfile": true
+}
