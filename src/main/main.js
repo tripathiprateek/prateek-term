@@ -879,6 +879,43 @@ ipcMain.handle('settings:choose-path', async () => {
   return path.join(result.filePaths[0], 'connection-profiles.json');
 });
 
+// ===== Session Persistence =====
+
+const SESSION_PATH = path.join(app.getPath('userData'), 'session.json');
+
+// Synchronous save so beforeunload can block until written
+ipcMain.on('session:save-sync', (event, data) => {
+  try {
+    fs.writeFileSync(SESSION_PATH, JSON.stringify(data, null, 2), 'utf8');
+    dbgLog(`[session] saved ${(data.tabs||[]).length} tabs to "${SESSION_PATH}"`);
+  } catch (e) {
+    dbgLog(`[session] save error: ${e.message}`);
+  }
+  event.returnValue = true;
+});
+
+ipcMain.handle('session:load', () => {
+  try {
+    if (!fs.existsSync(SESSION_PATH)) return null;
+    const raw = fs.readFileSync(SESSION_PATH, 'utf8');
+    const data = JSON.parse(raw);
+    dbgLog(`[session] loaded ${(data.tabs||[]).length} tabs saved at ${data.savedAt}`);
+    return data;
+  } catch (e) {
+    dbgLog(`[session] load error: ${e.message}`);
+    return null;
+  }
+});
+
+ipcMain.on('session:clear', () => {
+  try {
+    if (fs.existsSync(SESSION_PATH)) fs.unlinkSync(SESSION_PATH);
+    dbgLog('[session] cleared');
+  } catch (e) {
+    dbgLog(`[session] clear error: ${e.message}`);
+  }
+});
+
 // ===== Debug Log IPC =====
 
 ipcMain.handle('debug:getLog', () => {

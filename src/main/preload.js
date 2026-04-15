@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('terminalAPI', {
     return () => ipcRenderer.removeListener('serial:exit', listener);
   },
 
+  // Session persistence
+  saveSessionSync: (data) => ipcRenderer.sendSync('session:save-sync', data),
+  loadSession:     ()     => ipcRenderer.invoke('session:load'),
+  clearSession:    ()     => ipcRenderer.send('session:clear'),
+
   // Debug logging
   debugGetLog: () => ipcRenderer.invoke('debug:getLog'),
   debugClearLog: () => ipcRenderer.send('debug:clearLog'),

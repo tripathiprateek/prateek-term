@@ -1380,6 +1380,94 @@ function removeEmptyState() {
   if (existing) existing.remove();
 }
 
+// ===== Session Persistence =====
+
+const SESSION_MAX_SCROLLBACK = 300; // lines per tab saved to session
+
+function captureScrollback(term) {
+  const buf = term.buffer.active;
+  const total = buf.length;
+  const start = Math.max(0, total - SESSION_MAX_SCROLLBACK);
+  const lines = [];
+  for (let i = start; i < total; i++) {
+    const line = buf.getLine(i);
+    if (line) lines.push(line.translateToString(false));
+  }
+  // Trim trailing blank lines
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  return lines;
+}
+
+function buildSessionData() {
+  const tabs = state.tabs
+    .filter(t => !t.isSerial) // serial ports change, don't persist
+    .map(t => ({
+      protocol:          t.protocol || 'local',
+      name:              t.name,
+      connectionProfileId: t.connectionProfile?.id || null,
+      scrollback:        captureScrollback(t.term),
+      cwd:               t._lastCwd || null,
+    }));
+  return { savedAt: new Date().toISOString(), activeTabId: state.activeTabId, tabs };
+}
+
+function writeScrollbackHistory(tab, lines) {
+  if (!lines || lines.length === 0) return;
+  tab.term.writeln('\x1b[2m╔════════════ restored history ════════════╗\x1b[0m');
+  for (const line of lines) {
+    tab.term.writeln('\x1b[2m' + line + '\x1b[0m');
+  }
+  tab.term.writeln('\x1b[2m╚══════════════════════════════════════════╝\x1b[0m');
+  tab.term.writeln('');
+}
+
+async function restoreSession() {
+  let session;
+  try { session = await window.terminalAPI.loadSession(); } catch { session = null; }
+  if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) {
+    showEmptyState();
+    return;
+  }
+
+  removeEmptyState();
+  let lastTabId = null;
+
+  for (const saved of session.tabs) {
+    try {
+      const profile = saved.connectionProfileId
+        ? state.profiles.find(p => p.id === saved.connectionProfileId) || null
+        : null;
+
+      if (saved.protocol === 'local') {
+        // Local terminal: open shell in saved cwd, show history
+        await createTab({ protocol: 'local', name: saved.name || 'Terminal' });
+        const tab = state.tabs[state.tabs.length - 1];
+        writeScrollbackHistory(tab, saved.scrollback);
+        lastTabId = tab.id;
+
+      } else if (profile) {
+        // SSH/Telnet/FTP: show history first, then reconnect
+        await createTab({
+          protocol:          saved.protocol,
+          name:              saved.name,
+          host:              profile.host,
+          connectionProfile: profile,
+        });
+        const tab = state.tabs[state.tabs.length - 1];
+        writeScrollbackHistory(tab, saved.scrollback);
+        lastTabId = tab.id;
+      }
+    } catch (e) {
+      console.error('[session] failed to restore tab:', e);
+    }
+  }
+
+  // Re-activate the previously active tab
+  const target = state.tabs.find(t => t.name === session.tabs.find((s, i) =>
+    state.tabs[i]?.id === state.activeTabId)?.name) || state.tabs[0];
+  if (target) switchTab(target.id);
+}
+
 // ===== Add Selection as Action (mini-dialog) =====
 
 function showAddSelectionAsActionDialog(x, y, script, tab) {
@@ -3687,7 +3775,7 @@ async function init() {
     state.currentTheme = savedSettings.theme || 'catppuccin-mocha';
     applyTheme(state.currentTheme);
     await loadProfiles();
-    showEmptyState();
+    await restoreSession();
     window.terminalAPI.onOpenSettings(openSettings);
     window.terminalAPI.onOpenFolder(openLocalFolderTab);
     window.terminalAPI.onAutoConnect((profile) => quickConnect(profile));
@@ -3707,6 +3795,15 @@ async function init() {
     console.error('Failed to initialize:', err);
   }
 }
+
+// Save session before window closes (synchronous IPC so it completes before quit)
+window.addEventListener('beforeunload', () => {
+  if (state.tabs.length > 0) {
+    window.terminalAPI.saveSessionSync(buildSessionData());
+  } else {
+    window.terminalAPI.clearSession();
+  }
+});
 
 // Prevent Electron from navigating to dropped files
 document.addEventListener('dragover', (e) => e.preventDefault());
