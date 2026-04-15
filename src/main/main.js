@@ -221,16 +221,32 @@ app.on('open-url', (event, url) => {
 });
 
 // macOS: folder/file opened via `open -b com.prateek.prateekterm <path>`
-// This is how the Automator Quick Action sends folders — no URL encoding needed.
+// Covers: Automator Quick Action, Finder "Open in Terminal" (default terminal),
+// drag-onto-dock, `open -b com.prateek.prateekterm /some/folder`.
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
   if (!filePath) return;
+
+  // Resolve to a directory — if a file was passed, use its parent folder.
+  let resolvedPath = filePath;
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isDirectory()) {
+      resolvedPath = path.dirname(filePath);
+      dbgLog(`[open-file] received file path, resolved to dir: ${resolvedPath}`);
+    }
+  } catch (e) {
+    dbgLog(`[open-file] stat failed for "${filePath}": ${e.message}`);
+  }
+
+  dbgLog(`[open-file] filePath="${filePath}" resolved="${resolvedPath}" rendererReady=${rendererReady}`);
+
   if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
-    mainWindow.webContents.send('open-folder', filePath);
+    mainWindow.webContents.send('open-folder', resolvedPath);
   } else {
-    pendingFolderPaths.push(filePath);
+    pendingFolderPaths.push(resolvedPath);
   }
 });
 
@@ -462,6 +478,32 @@ app.whenReady().then(() => {
   }
 
   installQuickActionIfNeeded();
+
+  // Check process.argv for a folder path passed by macOS when launching as the
+  // default terminal (e.g. Finder "Open in Terminal" cold-launch).
+  // macOS may pass the folder as argv[1] alongside Electron internals.
+  // We check AFTER the app is ready (open-file fires earlier, but argv is always available).
+  const argvFolderPath = (() => {
+    // Skip Electron/app internals — look for the first absolute path to an existing directory.
+    const args = process.argv.slice(1);
+    dbgLog(`[argv] checking for folder: [${args.join(', ')}]`);
+    for (const arg of args) {
+      if (!arg.startsWith('-') && path.isAbsolute(arg)) {
+        try {
+          if (fs.statSync(arg).isDirectory()) {
+            return arg;
+          }
+        } catch { /* not a valid path */ }
+      }
+    }
+    return null;
+  })();
+
+  if (argvFolderPath) {
+    dbgLog(`[argv] found folder path: ${argvFolderPath}`);
+    pendingFolderPaths.push(argvFolderPath);
+  }
+
   createWindow();
 
   // Start MCP bridge if user has enabled it in settings
@@ -524,9 +566,17 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const args = options.args || ['-l'];
 
   let cwd = options.cwd || process.env.HOME || '/';
+  // Ensure cwd is a readable DIRECTORY (not a file path).
   try {
+    const st = fs.statSync(cwd);
+    if (!st.isDirectory()) {
+      // Received a file path — use its parent directory instead.
+      dbgLog(`[pty] cwd "${cwd}" is a file, using dirname`);
+      cwd = path.dirname(cwd);
+    }
     fs.accessSync(cwd, fs.constants.R_OK);
   } catch {
+    dbgLog(`[pty] cwd "${cwd}" not accessible, falling back to HOME`);
     cwd = process.env.HOME || '/';
     try {
       fs.accessSync(cwd, fs.constants.R_OK);
