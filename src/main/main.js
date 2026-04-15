@@ -740,8 +740,13 @@ ipcMain.handle('mcp:register', async () => {
     const nodeModules = path.join(mcpDir, 'node_modules', '@modelcontextprotocol');
     if (!fs.existsSync(nodeModules)) {
       const { execSync } = require('child_process');
+      // Electron packaged apps have a minimal PATH that usually doesn't include
+      // /opt/homebrew/bin or /usr/local/bin where npm lives.  Extend the PATH so
+      // npm (and node) can be found.
+      const extraPaths = ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.npm-global', 'bin')];
+      const envPATH = (process.env.PATH || '') + ':' + extraPaths.join(':');
       try {
-        execSync('npm install --production', { cwd: mcpDir, timeout: 60000, stdio: 'pipe' });
+        execSync('npm install --omit=dev', { cwd: mcpDir, timeout: 60000, stdio: 'pipe', env: { ...process.env, PATH: envPATH } });
       } catch (e) {
         console.error('[MCP register] npm install failed:', e.message);
       }
