@@ -550,10 +550,8 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   bridge.ensureBuf(id);
 
   term.onData((data) => {
-    // term._cwdMute is set during getRemoteCwd probes to suppress the
-    // probe command and its output from appearing in the terminal view.
     const owner = terminalOwners.get(id);
-    if (owner && !owner.isDestroyed() && !term._cwdMute) {
+    if (owner && !owner.isDestroyed()) {
       owner.send('terminal:data', { id, data });
     }
     // Feed MCP output buffer so AI agents can read output / detect prompts
@@ -1045,59 +1043,20 @@ ipcMain.handle('dialog:selectDirectory', async (event, options = {}) => {
 // ---------- Remote CWD Detection ----------
 
 ipcMain.handle('terminal:getCwd', (event, { id }) => {
-  return new Promise((resolve) => {
-    const term = terminals.get(id);
-    if (!term) return resolve(null);
-
-    const marker = `__SANKET_CWD_${Date.now()}__`;
-    let buffer = '';
-    let resolved = false;
-
-    const dispose = term.onData((data) => {
-      if (resolved) return;
-      buffer += data;
-      // Skip past the echo of the command (first \r\n) to avoid matching
-      // the marker strings that appear literally in the echoed command text
-      const echoEnd = buffer.indexOf('\r\n');
-      const searchFrom = echoEnd !== -1 ? echoEnd + 2 : 0;
-      const start = buffer.indexOf(marker + 'S', searchFrom);
-      const end = buffer.indexOf(marker + 'E', searchFrom);
-      if (start !== -1 && end !== -1) {
-        resolved = true;
-        dispose.dispose();
-        const cwd = buffer
-          .substring(start + marker.length + 1, end)
-          .replace(/\r?\n/g, '')
-          .trim();
-        // Delay unmute so trailing shell prompt (arrives in next PTY chunk)
-        // stays suppressed and never shows in the terminal.
-        setTimeout(() => { term._cwdMute = false; }, 150);
-        resolve(cwd || null);
-      }
-    });
-
-    // Mute terminal output to the renderer while the probe runs so the
-    // printf command and its response are never visible to the user.
-    term._cwdMute = true;
-
-    // Use printf to emit markers around pwd output.
-    // The marker is split across two shell string literals so the echo of
-    // this command does NOT contain the full markerS / markerE tokens,
-    // preventing false-positive detection from the echoed input line.
-    const half = Math.ceil(marker.length / 2);
-    const m1 = marker.slice(0, half);
-    const m2 = marker.slice(half);
-    term.write(`printf '${m1}''${m2}S%s${m1}''${m2}E' "$(pwd)"\n`);
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        dispose.dispose();
-        term._cwdMute = false;
-        resolve(null);
-      }
-    }, 3000);
-  });
+  const term = terminals.get(id);
+  if (!term || !term.pid) return null;
+  try {
+    // Read CWD directly from the shell process — no commands injected into the terminal.
+    // lsof -p <pid> -a -d cwd -Fn emits lines like "fcwd" then "n/path/to/dir".
+    const output = require('child_process').execFileSync(
+      'lsof', ['-p', String(term.pid), '-a', '-d', 'cwd', '-Fn'],
+      { timeout: 2000, encoding: 'utf8' }
+    );
+    const line = output.split('\n').find(l => l.startsWith('n'));
+    return line ? line.slice(1).trim() : null;
+  } catch {
+    return null;
+  }
 });
 
 // ---------- SCP Drag-and-Drop Upload ----------
