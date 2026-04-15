@@ -1065,11 +1065,13 @@ ipcMain.handle('terminal:getCwd', (event, { id }) => {
       if (start !== -1 && end !== -1) {
         resolved = true;
         dispose.dispose();
-        term._cwdMute = false;
         const cwd = buffer
           .substring(start + marker.length + 1, end)
           .replace(/\r?\n/g, '')
           .trim();
+        // Delay unmute so trailing shell prompt (arrives in next PTY chunk)
+        // stays suppressed and never shows in the terminal.
+        setTimeout(() => { term._cwdMute = false; }, 150);
         resolve(cwd || null);
       }
     });

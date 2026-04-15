@@ -411,6 +411,23 @@ function applyTheme(themeId) {
   state.currentTheme = themeId;
 }
 
+// ===== Local Terminal Profile =====
+const LOCAL_PROFILE_ID = '__local__';
+
+function getLocalProfile() {
+  let localProfile = state.profiles.find(p => p.id === LOCAL_PROFILE_ID);
+  if (!localProfile) {
+    localProfile = {
+      id: LOCAL_PROFILE_ID,
+      name: 'Local',
+      protocol: 'local',
+      actions: []
+    };
+    state.profiles.push(localProfile);
+  }
+  return localProfile;
+}
+
 // ===== State =====
 const state = {
   tabs: [],
@@ -634,7 +651,7 @@ async function createTab(options = {}) {
     searchAddon,
     pane,
     filterBar,
-    connectionProfile: options.connectionProfile || null,
+    connectionProfile: options.connectionProfile || (protocol === 'local' ? getLocalProfile() : null),
     activeTransferId: null,
     // Serial output filter state
     filterActive:     false,
@@ -848,6 +865,41 @@ async function createTab(options = {}) {
 
   // Drag-and-drop file upload for SSH tabs
   setupPaneDragDrop(pane, tab);
+
+  // For local terminals: update tab name to current directory.
+  // Trigger check 500ms after user presses Enter (cwd only changes on command).
+  if (protocol === 'local' && tab.ptyId) {
+    const checkCwd = async () => {
+      if (!tab.ptyId || tab._cwdPollStopped) return;
+      try {
+        const cwd = await window.terminalAPI.getRemoteCwd(tab.ptyId);
+        if (cwd) {
+          const parts = cwd.split('/').filter(Boolean);
+          const dirName = parts.pop() || '/';
+          if (dirName !== tab._lastCwd) {
+            tab._lastCwd = dirName;
+            tab.name = dirName;
+            const tabEl = document.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+            if (tabEl) {
+              const titleEl = tabEl.querySelector('.tab-title');
+              if (titleEl) titleEl.textContent = dirName;
+            }
+          }
+        }
+      } catch { /* ignore probe errors */ }
+    };
+
+    let cwdDebounce = null;
+    tab._cwdEnterListener = term.onData((data) => {
+      if (data === '\r' || data === '\n') {
+        clearTimeout(cwdDebounce);
+        cwdDebounce = setTimeout(checkCwd, 500);
+      }
+    });
+
+    // One-time initial check to set the name on open
+    checkCwd();
+  }
 
   // Auto-copy on selection (PuTTY / Linux terminal style)
   term.onSelectionChange(() => {
@@ -1237,6 +1289,11 @@ function closeTab(tabId) {
     window.terminalAPI.logStop(tab.logId);
     tab.logId = null;
   }
+  if (tab._cwdEnterListener) {
+    tab._cwdEnterListener.dispose();
+    tab._cwdEnterListener = null;
+  }
+  tab._cwdPollStopped = true;
   if (tab.isSerial && tab.serialId) {
     window.terminalAPI.serialClose(tab.serialId);
   } else if (tab.ptyId) {
@@ -1870,7 +1927,8 @@ function renderSidebarTagFilters() {
 
 function renderSidebarHosts() {
   const searchTerm = (dom.sidebarSearchInput.value || '').toLowerCase().trim();
-  let profiles = state.profiles;
+  // Exclude built-in hidden profiles from sidebar host groups
+  let profiles = state.profiles.filter((p) => p.id !== LOCAL_PROFILE_ID);
 
   if (searchTerm) {
     profiles = profiles.filter((p) =>
@@ -1888,10 +1946,63 @@ function renderSidebarHosts() {
 
   dom.sidebarHostsList.innerHTML = '';
 
+  // ── Fixed "Local Terminals" section (always shown, not a saved profile) ──
+  const localSection = document.createElement('div');
+  localSection.className = 'sidebar-group';
+
+  const localIsCollapsed = state.collapsedGroups['__local_section__'] || false;
+  const localHeader = document.createElement('div');
+  localHeader.className = 'sidebar-group-header' + (localIsCollapsed ? ' collapsed' : '');
+  localHeader.innerHTML = `
+    <svg class="group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+    Local Terminals
+  `;
+  localHeader.addEventListener('click', () => {
+    state.collapsedGroups['__local_section__'] = !state.collapsedGroups['__local_section__'];
+    localHeader.classList.toggle('collapsed');
+    localItems.style.display = state.collapsedGroups['__local_section__'] ? 'none' : '';
+  });
+
+  const localItems = document.createElement('div');
+  localItems.className = 'sidebar-group-items';
+  if (localIsCollapsed) localItems.style.display = 'none';
+
+  const newTermTile = document.createElement('div');
+  newTermTile.className = 'sidebar-host sidebar-local-tile';
+  newTermTile.title = 'Double-click to open a new local terminal';
+  newTermTile.innerHTML = `
+    <span class="host-dot local"></span>
+    <div class="host-info">
+      <span class="host-label">New Terminal</span>
+      <span class="host-address">~</span>
+    </div>
+    <svg class="sidebar-local-new-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <line x1="12" y1="5" x2="12" y2="19"></line>
+      <line x1="5" y1="12" x2="19" y2="12"></line>
+    </svg>
+  `;
+  newTermTile.addEventListener('dblclick', () => {
+    removeEmptyState();
+    createTab({ protocol: 'local' });
+  });
+
+  localItems.appendChild(newTermTile);
+  localSection.appendChild(localHeader);
+  localSection.appendChild(localItems);
+  dom.sidebarHostsList.appendChild(localSection);
+
+  if (profiles.length === 0 && !searchTerm && !state.activeTagFilter) {
+    // Only local tile shown — that's fine, no "no saved hosts" message needed
+    return;
+  }
+
   if (profiles.length === 0) {
-    dom.sidebarHostsList.innerHTML = `<div class="sidebar-empty">${
-      searchTerm || state.activeTagFilter ? 'No matching hosts' : 'No saved hosts'
-    }</div>`;
+    const empty = document.createElement('div');
+    empty.className = 'sidebar-empty';
+    empty.textContent = searchTerm || state.activeTagFilter ? 'No matching hosts' : '';
+    if (empty.textContent) dom.sidebarHostsList.appendChild(empty);
     return;
   }
 
@@ -2435,7 +2546,7 @@ function updateProtocolSections() {
   const isSSH = protocol === 'ssh';
   const isSerial = protocol === 'serial';
 
-  // Hide host/port/username rows for serial (they're not applicable)
+  // Hide host/port/username rows for serial (not applicable)
   const hostRow = dom.connHost?.closest('.form-row') || dom.connHost?.parentElement?.closest('.form-row');
   if (hostRow) hostRow.classList.toggle('hidden', isSerial);
 
@@ -2645,7 +2756,8 @@ function renderProfilesList() {
   const filter = dom.filterProtocol.value;
   const searchTerm = (dom.profilesSearchInput.value || '').toLowerCase().trim();
 
-  let profiles = state.profiles;
+  // Exclude built-in hidden profiles from the connection manager list
+  let profiles = state.profiles.filter((p) => p.id !== LOCAL_PROFILE_ID);
 
   if (filter === 'ssh') {
     profiles = profiles.filter((p) => p.protocol === 'ssh');
@@ -3213,6 +3325,7 @@ function setupEventListeners() {
       dom.connSCPLocal.value = dirPath;
     }
   });
+
 
   // IPv4/IPv6 mutual exclusion
   dom.optIpv4.addEventListener('change', () => {

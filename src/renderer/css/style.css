@@ -490,6 +490,7 @@ body {
   flex-shrink: 0;
 }
 
+.sidebar-host .host-dot.local { background: var(--text-muted); }
 .sidebar-host .host-dot.ssh { background: var(--accent-blue); }
 .sidebar-host .host-dot.telnet { background: var(--accent-yellow); }
 .sidebar-host .host-dot.ftp { background: var(--accent-green); }
@@ -537,6 +538,20 @@ body {
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
+}
+
+.sidebar-local-tile {
+  position: relative;
+}
+
+.sidebar-local-tile:hover .sidebar-local-new-icon {
+  opacity: 1;
+}
+
+.sidebar-local-new-icon {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  color: var(--text-muted);
 }
 
 /* ===== Terminal Container ===== */
@@ -849,6 +864,7 @@ body {
   letter-spacing: 0.5px;
 }
 
+.profile-item .profile-icon.local { background: #45475a30; color: var(--text-secondary); }
 .profile-item .profile-icon.ssh { background: #89b4fa18; color: var(--accent-blue); }
 .profile-item .profile-icon.telnet { background: #f9e2af18; color: var(--accent-yellow); }
 .profile-item .profile-icon.ftp { background: #a6e3a118; color: var(--accent-green); }
