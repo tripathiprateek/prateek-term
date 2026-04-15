@@ -135,6 +135,15 @@ async function checkForUpdates(includePrerelease = false) {
 
 const { SerialPort } = require('serialport');
 
+// ── Default Terminal Native Addon (optional — built separately) ───────────
+let defaultTerminalAddon = null;
+try {
+  defaultTerminalAddon = require('../native/index.js');
+  dbgLog('[default-terminal] native addon loaded');
+} catch (e) {
+  dbgLog(`[default-terminal] native addon not available: ${e.message}`);
+}
+
 // Multiple instances are allowed — each window is independent.
 // URL scheme (prateekterm://) is handled via app.on('open-url') on macOS.
 
@@ -1097,6 +1106,33 @@ ipcMain.handle('help:open', () => {
   });
   helpWindow.loadFile(path.join(__dirname, '..', 'renderer', 'help.html'));
   helpWindow.on('closed', () => { helpWindow = null; });
+});
+
+// ── Default Terminal IPC ─────────────────────────────────────────────────
+
+ipcMain.handle('defaultTerminal:isDefault', () => {
+  dbgLog('[default-terminal] isDefault query');
+  if (!defaultTerminalAddon) return { isDefault: false, nativeAvailable: false };
+  return {
+    isDefault: defaultTerminalAddon.isDefaultTerminal(),
+    nativeAvailable: defaultTerminalAddon.nativeAvailable,
+    currentBundleId: defaultTerminalAddon.getDefaultTerminalBundleId(),
+  };
+});
+
+ipcMain.handle('defaultTerminal:set', () => {
+  dbgLog('[default-terminal] set as default requested');
+  if (!defaultTerminalAddon || !defaultTerminalAddon.nativeAvailable) {
+    return { ok: false, error: 'Native addon not compiled. Run: npm run rebuild:native' };
+  }
+  try {
+    defaultTerminalAddon.setDefaultTerminal();
+    dbgLog('[default-terminal] setDefaultTerminal() called');
+    return { ok: true };
+  } catch (e) {
+    dbgLog(`[default-terminal] setDefaultTerminal failed: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
 });
 
 // ── Update IPC ───────────────────────────────────────────────────────────

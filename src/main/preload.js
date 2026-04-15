@@ -143,6 +143,10 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   mcpStatus:   () => ipcRenderer.invoke('mcp:status'),
   mcpRegister: () => ipcRenderer.invoke('mcp:register'),
 
+  // ── Default Terminal ─────────────────────────────────────────────────────
+  isDefaultTerminal: () => ipcRenderer.invoke('defaultTerminal:isDefault'),
+  setDefaultTerminal: () => ipcRenderer.invoke('defaultTerminal:set'),
+
   // ── Auto-update ──────────────────────────────────────────────────────────
   // Check for updates (pass { includePrerelease: true } to include RC/beta)
   checkForUpdates: (opts) => ipcRenderer.invoke('update:check', opts),

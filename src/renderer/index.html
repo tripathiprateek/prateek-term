@@ -723,6 +723,24 @@
 
           <!-- General -->
           <div class="settings-panel active" id="settings-tab-general">
+
+            <section class="settings-section">
+              <h3 class="settings-section-title">Default Terminal</h3>
+              <p class="settings-section-desc">
+                Make Prateek-Term open when you choose "Open in Terminal" from Finder
+                or double-click a shell script. Once set, you can change it back in
+                <strong>System Settings → General → Default Apps</strong>.
+              </p>
+              <div class="settings-default-term-row">
+                <button id="btn-set-default-terminal" class="btn btn-primary">
+                  Set as Default Terminal
+                </button>
+                <span id="default-terminal-status" class="settings-default-term-status"></span>
+              </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
             <section class="settings-section">
               <h3 class="settings-section-title">Connection Storage</h3>
               <p class="settings-section-desc">

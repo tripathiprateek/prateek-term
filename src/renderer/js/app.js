@@ -3233,6 +3233,32 @@ function setupEventListeners() {
   document.getElementById('settings-modal').querySelector('.modal-backdrop').addEventListener('click', closeSettings);
   document.getElementById('btn-settings-save').addEventListener('click', saveSettings);
   document.getElementById('btn-choose-path').addEventListener('click', chooseProfilesPath);
+
+  // Default terminal button
+  document.getElementById('btn-set-default-terminal').addEventListener('click', async () => {
+    const btn    = document.getElementById('btn-set-default-terminal');
+    const status = document.getElementById('default-terminal-status');
+    btn.disabled    = true;
+    btn.textContent = 'Setting…';
+    try {
+      const res = await window.terminalAPI.setDefaultTerminal();
+      if (res.ok) {
+        // On macOS 12+ the system dialog handles confirmation;
+        // re-check status after a short delay to reflect the change.
+        setTimeout(refreshDefaultTerminalStatus, 1500);
+      } else {
+        status.textContent = res.error || 'Failed to set default terminal';
+        status.className   = 'settings-default-term-status not-default';
+        btn.disabled       = false;
+        btn.textContent    = 'Set as Default Terminal';
+      }
+    } catch (e) {
+      status.textContent = e.message;
+      status.className   = 'settings-default-term-status not-default';
+      btn.disabled       = false;
+      btn.textContent    = 'Set as Default Terminal';
+    }
+  });
   document.getElementById('btn-import-ssh').addEventListener('click', importSSHConfig);
   document.getElementById('btn-import-json').addEventListener('click', importJSON);
   document.getElementById('btn-export-ssh').addEventListener('click', exportSSHConfig);
@@ -3529,6 +3555,36 @@ async function openSettings() {
 
   setSettingsStatus('');
   modal.classList.remove('hidden');
+
+  // Default terminal status badge
+  refreshDefaultTerminalStatus();
+}
+
+async function refreshDefaultTerminalStatus() {
+  const btn    = document.getElementById('btn-set-default-terminal');
+  const status = document.getElementById('default-terminal-status');
+  if (!btn || !status) return;
+
+  try {
+    const res = await window.terminalAPI.isDefaultTerminal();
+    if (res.isDefault) {
+      status.textContent = '✓ Already the default terminal';
+      status.className   = 'settings-default-term-status is-default';
+      btn.disabled       = true;
+      btn.textContent    = 'Default Terminal';
+    } else if (!res.nativeAvailable) {
+      status.textContent = 'Native addon not compiled (run: npm run rebuild:native)';
+      status.className   = 'settings-default-term-status not-default';
+      btn.disabled       = true;
+    } else {
+      status.textContent = res.currentBundleId ? `Current: ${res.currentBundleId}` : '';
+      status.className   = 'settings-default-term-status not-default';
+      btn.disabled       = false;
+      btn.textContent    = 'Set as Default Terminal';
+    }
+  } catch (e) {
+    status.textContent = '';
+  }
 }
 
 function renderThemePicker(selectedId) {

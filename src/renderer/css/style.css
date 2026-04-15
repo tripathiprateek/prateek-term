@@ -1895,6 +1895,28 @@ body {
   margin: 0;
 }
 
+/* Default terminal row */
+.settings-default-term-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.settings-default-term-status {
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+
+.settings-default-term-status.is-default {
+  color: var(--success, #4caf50);
+  font-weight: 500;
+}
+
+.settings-default-term-status.not-default {
+  color: var(--text-muted, #888);
+}
+
 /* Storage path row */
 .settings-path-row {
   display: flex;
