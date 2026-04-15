@@ -1573,15 +1573,19 @@ function showTerminalContextMenu(x, y, term, tab) {
       // correctly, preventing garbled output in shells and python -c invocations.
       term.paste(text);
     }
+    // Return focus to terminal so keyboard input works immediately after action/paste
+    term.focus();
   };
 
   menu.querySelector('.ctx-copy').addEventListener('click', () => {
     if (term.hasSelection()) navigator.clipboard.writeText(term.getSelection()).catch(() => {});
     menu.remove();
+    term.focus();
   });
   menu.querySelector('.ctx-paste').addEventListener('click', () => {
     navigator.clipboard.readText().then(sendText).catch(() => {});
     menu.remove();
+    // sendText() already calls term.focus() after the async readText resolves
   });
 
   if (canAddAsAction) {
@@ -1636,6 +1640,7 @@ function showTerminalContextMenu(x, y, term, tab) {
   menu.querySelector('.ctx-log-start').addEventListener('click', async () => {
     menu.remove();
     const result = await window.terminalAPI.logStart();
+    term.focus();
     if (!result) return; // user cancelled
     tab.logId = result.logId;
     tab.logPath = result.filePath;
@@ -1649,12 +1654,14 @@ function showTerminalContextMenu(x, y, term, tab) {
     tab.logId = null;
     tab.logPath = null;
     removeLogBadge(tab);
+    term.focus();
   });
 
   // Filter toggle (serial tabs only)
   menu.querySelector('.ctx-filter-toggle')?.addEventListener('click', () => {
     menu.remove();
     tab.filterActive ? disableSerialFilter(tab) : enableSerialFilter(tab);
+    term.focus();
   });
 
   // Position menu — keep it inside the viewport
@@ -1664,7 +1671,11 @@ function showTerminalContextMenu(x, y, term, tab) {
   menu.style.top  = `${Math.min(y, window.innerHeight - menuHeight)}px`;
   document.body.appendChild(menu);
 
-  setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+  setTimeout(() => document.addEventListener('click', () => {
+    menu.remove();
+    const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+    if (activeTab) activeTab.term.focus();
+  }, { once: true }), 0);
 }
 
 function showLogBadge(tab) {
