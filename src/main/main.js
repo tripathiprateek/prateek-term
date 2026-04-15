@@ -89,22 +89,31 @@ const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
  * is available. Pass includePrerelease=true to surface RC/beta releases.
  */
 async function checkForUpdates(includePrerelease = false) {
+  dbgLog(`[update] checking releases includePrerelease=${includePrerelease}`);
   try {
     const res = await fetch(`${RELEASES_API}?per_page=10`, {
       headers: { 'User-Agent': 'prateek-term', Accept: 'application/vnd.github.v3+json' },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      dbgLog(`[update] GitHub API returned ${res.status}`);
+      return null;
+    }
     const releases = await res.json();
     if (!Array.isArray(releases)) return null;
 
     // Find the newest release matching channel preference
     const candidate = releases.find(r => !r.draft && (includePrerelease || !r.prerelease));
-    if (!candidate) return null;
+    if (!candidate) {
+      dbgLog('[update] no suitable release found');
+      return null;
+    }
 
     const remoteVersion = (candidate.tag_name || '').replace(/^v/, '');
     const localVersion  = app.getVersion();
+    dbgLog(`[update] local=${localVersion} remote=${remoteVersion} prerelease=${candidate.prerelease}`);
     if (remoteVersion && isVersionNewer(remoteVersion, localVersion)) {
+      dbgLog(`[update] update available: ${localVersion} → ${remoteVersion}`);
       const payload = {
         version:    remoteVersion,
         url:        candidate.html_url,
@@ -116,8 +125,10 @@ async function checkForUpdates(includePrerelease = false) {
       });
       return payload;
     }
+    dbgLog('[update] already up to date');
     return null;
-  } catch {
+  } catch (e) {
+    dbgLog(`[update] check failed: ${e.message}`);
     return null; // network errors are always silent
   }
 }
@@ -233,6 +244,7 @@ ipcMain.on('renderer:ready', (event) => {
 
 // Open a new independent window, optionally auto-connecting to a profile
 ipcMain.handle('window:open-new', (event, profile) => {
+  dbgLog(`[window] open-new${profile ? ` profile="${profile.name}" protocol=${profile.protocol}` : ' (no profile)'}`);
   const win = createNewWindow();
   if (profile) pendingAutoConnect.set(win.webContents.id, profile);
   return { success: true };
@@ -338,6 +350,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Startup banner — logged once so support logs are self-describing
+  const { version: appVer, buildNum } = getVersionInfo();
+  dbgLog(`=== Prateek-Term ${appVer} (build ${buildNum}) starting ===`);
+  dbgLog(`platform=${process.platform} arch=${process.arch} node=${process.version} electron=${process.versions.electron}`);
+  dbgLog(`os=${os.type()} ${os.release()} | cpus=${os.cpus().length} | mem=${Math.round(os.totalmem()/1024/1024)}MB`);
+  dbgLog(`userData=${app.getPath('userData')} home=${os.homedir()}`);
+
   // Set dock icon in dev mode (macOS ignores BrowserWindow icon)
   const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
   try {
@@ -489,6 +508,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const ownerContents = event.sender;
   const id = ++terminalIdCounter;
   const shell = options.shell || findShell();
+  dbgLog(`[pty:${id}] create shell="${shell}" args=[${(options.args||['-l']).join(',')}] cwd="${options.cwd||'(default)'}" cols=${options.cols||80} rows=${options.rows||24} customCmd=${!!options.shell}`);
   // Use -l (login shell) by default so ~/.bash_profile / ~/.zprofile are sourced
   // and the PTY inherits the user's full PATH (NVM, Homebrew, Go, etc.) — the same
   // environment iTerm2 and Terminal.app provide. Callers can pass args: [] explicitly
@@ -532,7 +552,9 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
       cwd,
       env,
     });
+    dbgLog(`[pty:${id}] spawned pid=${term.pid} shell="${shell}" cwd="${cwd}"`);
   } catch (err) {
+    dbgLog(`[pty:${id}] spawn failed shell="${shell}" cwd="${cwd}" err="${err.message}" — falling back to /bin/sh`);
     console.error(`Failed to spawn shell "${shell}" in "${cwd}":`, err.message);
     term = pty.spawn('/bin/sh', args, {
       name: 'xterm-256color',
@@ -541,6 +563,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
       cwd: '/',
       env,
     });
+    dbgLog(`[pty:${id}] fallback spawned pid=${term.pid}`);
   }
 
   terminals.set(id, term);
@@ -562,6 +585,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const cleanupFiles = options._cleanupFiles || [];
 
   term.onExit(({ exitCode, signal }) => {
+    dbgLog(`[pty:${id}] exit code=${exitCode} signal=${signal||'none'} pid=${term.pid}`);
     const owner = terminalOwners.get(id);
     terminals.delete(id);
     terminalOwners.delete(id);
@@ -580,8 +604,12 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
 
 // Re-route terminal data to the new owner window (used by tab tear-off)
 ipcMain.handle('terminal:adopt', (event, id) => {
-  if (!terminals.has(id)) return { success: false };
+  if (!terminals.has(id)) {
+    dbgLog(`[pty:${id}] adopt FAILED — terminal not found`);
+    return { success: false };
+  }
   terminalOwners.set(id, event.sender);
+  dbgLog(`[pty:${id}] adopted by new window`);
   return { success: true };
 });
 
@@ -606,8 +634,11 @@ ipcMain.on('terminal:resize', (event, { id, cols, rows }) => {
 ipcMain.on('terminal:kill', (event, { id }) => {
   const term = terminals.get(id);
   if (term) {
+    dbgLog(`[pty:${id}] kill requested pid=${term.pid}`);
     term.kill();
     terminals.delete(id);
+  } else {
+    dbgLog(`[pty:${id}] kill requested but terminal not found (already exited?)`);
   }
 });
 
@@ -615,8 +646,11 @@ ipcMain.on('terminal:kill', (event, { id }) => {
 // All command-building functions are imported from ./ssh-utils.js
 
 ipcMain.handle('connection:connect', (event, profile) => {
+  const authDesc = profile.authType === 'password' ? 'password' : (profile.pemFile ? 'key-file' : profile.pemText ? 'key-pasted' : 'agent');
+  dbgLog(`[connect] protocol=${profile.protocol} host=${profile.host} port=${profile.port||'default'} user=${profile.username||'(none)'} auth=${authDesc} strictHost=${!!profile.strictHostOff}`);
   if (profile.protocol === 'ssh') {
     const mode = profile.sshMode || 'terminal';
+    dbgLog(`[connect] ssh mode=${mode} compression=${!!profile.compression}`);
     switch (mode) {
       case 'sftp':
         return buildSFTPCommand(profile);
@@ -633,6 +667,7 @@ ipcMain.handle('connection:connect', (event, profile) => {
     case 'ftp':
       return buildFTPCommand(profile);
     default:
+      dbgLog(`[connect] ERROR unknown protocol: ${profile.protocol}`);
       throw new Error(`Unknown protocol: ${profile.protocol}`);
   }
 });
@@ -643,9 +678,13 @@ function loadProfiles() {
   const p = getProfilesPath();
   try {
     if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+      const profiles = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      dbgLog(`[profiles] loaded ${profiles.length} profiles from "${p}"`);
+      return profiles;
     }
+    dbgLog(`[profiles] no file at "${p}" — returning empty list`);
   } catch (e) {
+    dbgLog(`[profiles] ERROR loading from "${p}": ${e.message}`);
     console.error('Failed to load profiles:', e);
   }
   return [];
@@ -657,7 +696,9 @@ function saveProfiles(profiles) {
     const dir = path.dirname(p);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(p, JSON.stringify(profiles, null, 2), 'utf-8');
+    dbgLog(`[profiles] saved ${profiles.length} profiles to "${p}"`);
   } catch (e) {
+    dbgLog(`[profiles] ERROR saving to "${p}": ${e.message}`);
     console.error('Failed to save profiles:', e);
   }
 }
@@ -673,29 +714,34 @@ ipcMain.handle('profiles:save', (event, profiles) => {
 
 ipcMain.handle('settings:load', () => {
   const s = loadSettings();
-  // Always surface the resolved path so renderer can display it
   s.profilesPath = getProfilesPath();
+  dbgLog(`[settings] loaded mcpEnabled=${s.mcpEnabled} mcpPort=${s.mcpPort||'default'} debugLogging=${s.debugLogging} profilesPath="${s.profilesPath}"`);
   return s;
 });
 
 ipcMain.handle('settings:save', (event, settings) => {
-  // If the user picked a new path, migrate the profiles file there
   const oldPath = getProfilesPath();
   saveSettings(settings);
   const newPath = getProfilesPath();
-  if (oldPath !== newPath && fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-    try {
-      const dir = path.dirname(newPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.copyFileSync(oldPath, newPath);
-    } catch (e) {
-      console.error('Failed to migrate profiles file:', e);
+  dbgLog(`[settings] saved mcpEnabled=${settings.mcpEnabled} mcpPort=${settings.mcpPort||'default'} debugLogging=${settings.debugLogging}`);
+  if (oldPath !== newPath) {
+    dbgLog(`[settings] profiles path changed "${oldPath}" → "${newPath}"`);
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      try {
+        const dir = path.dirname(newPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.copyFileSync(oldPath, newPath);
+        dbgLog(`[settings] migrated profiles file to "${newPath}"`);
+      } catch (e) {
+        dbgLog(`[settings] ERROR migrating profiles file: ${e.message}`);
+        console.error('Failed to migrate profiles file:', e);
+      }
     }
   }
-  // Start or stop MCP bridge based on updated settings
   if (settings.mcpEnabled) {
     if (!bridge.isRunning()) startBridgeIfEnabled();
   } else {
+    if (bridge.isRunning()) dbgLog('[settings] mcpEnabled=false — stopping bridge');
     bridge.stop();
   }
   return true;
@@ -1053,7 +1099,10 @@ ipcMain.handle('dialog:selectDirectory', async (event, options = {}) => {
 
 ipcMain.handle('terminal:getCwd', (event, { id }) => {
   const term = terminals.get(id);
-  if (!term || !term.pid) return null;
+  if (!term || !term.pid) {
+    dbgLog(`[pty:${id}] getCwd — terminal not found or no pid`);
+    return null;
+  }
   try {
     // Read CWD directly from the shell process — no commands injected into the terminal.
     // lsof -p <pid> -a -d cwd -Fn emits lines like "fcwd" then "n/path/to/dir".
@@ -1062,8 +1111,11 @@ ipcMain.handle('terminal:getCwd', (event, { id }) => {
       { timeout: 2000, encoding: 'utf8' }
     );
     const line = output.split('\n').find(l => l.startsWith('n'));
-    return line ? line.slice(1).trim() : null;
-  } catch {
+    const cwd = line ? line.slice(1).trim() : null;
+    dbgLog(`[pty:${id}] getCwd pid=${term.pid} → "${cwd||'(null)'}"`);
+    return cwd;
+  } catch (e) {
+    dbgLog(`[pty:${id}] getCwd lsof failed pid=${term.pid} err="${e.message}"`);
     return null;
   }
 });
@@ -1080,6 +1132,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   let isDirectory = false;
   try { isDirectory = fs.statSync(filePath).isDirectory(); } catch { /* let scp report the error */ }
   if (isDirectory) flags.push('-r');
+  dbgLog(`[scp:${transferId}] upload "${fileName}" → ${profile.username||''}@${profile.host}:${remotePath||'~/'} isDir=${isDirectory} pemFile=${!!profile.pemFile}`);
 
   if (profile.pemFile) {
     flags.push('-i', profile.pemFile);
@@ -1136,6 +1189,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
 
   proc.onExit(({ exitCode }) => {
     scpTransfers.delete(transferId);
+    dbgLog(`[scp:${transferId}] exit code=${exitCode} file="${fileName}"`);
     if (!senderContents.isDestroyed()) {
       senderContents.send('scp:complete', {
         transferId,
@@ -1152,6 +1206,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
 ipcMain.on('scp:cancel', (event, { transferId }) => {
   const proc = scpTransfers.get(transferId);
   if (proc) {
+    dbgLog(`[scp:${transferId}] cancelled by user`);
     proc.kill();
     scpTransfers.delete(transferId);
   }
@@ -1168,6 +1223,7 @@ ipcMain.handle('key:saveTempKey', (event, pemContent) => {
   const keyPath = path.join(keysDir, `pasted-key-${hash}`);
 
   fs.writeFileSync(keyPath, pemContent, { mode: 0o600 });
+  dbgLog(`[key] saved pasted PEM to "${keyPath}" (hash=${hash})`);
   return keyPath;
 });
 
@@ -1214,11 +1270,15 @@ ipcMain.handle('log:start', async () => {
     filters: [{ name: 'Log Files', extensions: ['log', 'txt'] }, { name: 'All Files', extensions: ['*'] }],
   });
 
-  if (result.canceled || !result.filePath) return null;
+  if (result.canceled || !result.filePath) {
+    dbgLog('[log] session log dialog cancelled');
+    return null;
+  }
 
   const logId = `log-${Date.now()}`;
   const stream = fs.createWriteStream(result.filePath, { flags: 'a', encoding: 'utf8' });
   logStreams.set(logId, stream);
+  dbgLog(`[log:${logId}] started → "${result.filePath}"`);
   return { logId, filePath: result.filePath };
 });
 
@@ -1229,16 +1289,23 @@ ipcMain.on('log:write', (event, { logId, data }) => {
 
 ipcMain.on('log:stop', (event, { logId }) => {
   const stream = logStreams.get(logId);
-  if (stream) { stream.end(); logStreams.delete(logId); }
+  if (stream) {
+    dbgLog(`[log:${logId}] stopped`);
+    stream.end();
+    logStreams.delete(logId);
+  }
 });
 
 // ===== Serial Port Handlers =====
 
 ipcMain.handle('serial:list-ports', async () => {
-  return await SerialPort.list();
+  const ports = await SerialPort.list();
+  dbgLog(`[serial] list-ports found ${ports.length}: ${ports.map(p=>p.path).join(', ')||'(none)'}`);
+  return ports;
 });
 
 ipcMain.handle('serial:connect', (event, { port, baudRate, dataBits, stopBits, parity, rtscts, xon }) => {
+  dbgLog(`[serial] connect port="${port}" baud=${baudRate} data=${dataBits} stop=${stopBits} parity=${parity} rtscts=${!!rtscts} xon=${!!xon}`);
   return new Promise((resolve, reject) => {
     const id = `serial-${Date.now()}`;
     const sp = new SerialPort({
@@ -1254,9 +1321,11 @@ ipcMain.handle('serial:connect', (event, { port, baudRate, dataBits, stopBits, p
 
     sp.open((err) => {
       if (err) {
+        dbgLog(`[serial] open FAILED port="${port}" err="${err.message}"`);
         reject(new Error(err.message));
         return;
       }
+      dbgLog(`[serial:${id}] opened port="${port}"`);
 
       sp.on('data', (data) => {
         const str = data.toString('binary');
@@ -1268,6 +1337,7 @@ ipcMain.handle('serial:connect', (event, { port, baudRate, dataBits, stopBits, p
       });
 
       sp.on('close', () => {
+        dbgLog(`[serial:${id}] closed port="${port}"`);
         serialConnections.delete(id);
         if (!event.sender.isDestroyed()) {
           event.sender.send('serial:exit', { id });
@@ -1275,6 +1345,7 @@ ipcMain.handle('serial:connect', (event, { port, baudRate, dataBits, stopBits, p
       });
 
       sp.on('error', (spErr) => {
+        dbgLog(`[serial:${id}] error: "${spErr.message}"`);
         if (!event.sender.isDestroyed()) {
           event.sender.send('serial:exit', { id, error: spErr.message });
         }
