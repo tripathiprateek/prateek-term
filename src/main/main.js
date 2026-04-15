@@ -738,9 +738,18 @@ ipcMain.handle('mcp:register', async () => {
     const nodeModules = path.join(mcpDir, 'node_modules', '@modelcontextprotocol');
     if (!fs.existsSync(nodeModules)) {
       const { execSync } = require('child_process');
+      // Electron packaged apps have a minimal PATH that often excludes
+      // /opt/homebrew/bin and /usr/local/bin where npm/node live.
+      // Extend PATH so npm can be found regardless of install location.
+      const extraPaths = [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        path.join(os.homedir(), '.npm-global', 'bin'),
+      ];
+      const envPATH = (process.env.PATH || '') + ':' + extraPaths.join(':');
       try {
         dbgLog(`[MCP] npm install in ${mcpDir}`);
-        execSync('npm install --production', { cwd: mcpDir, timeout: 60000, stdio: 'pipe' });
+        execSync('npm install --omit=dev', { cwd: mcpDir, timeout: 60000, stdio: 'pipe', env: { ...process.env, PATH: envPATH } });
         dbgLog('[MCP] npm install succeeded');
       } catch (e) {
         dbgLog(`[MCP ERROR] npm install failed: ${e.message}`);
