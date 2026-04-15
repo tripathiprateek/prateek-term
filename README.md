@@ -117,9 +117,3 @@ npm run dist:arm64   # builds DMG + ZIP for Apple Silicon
 ## License
 
 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
-
-For commercial licensing, contact: tripathiprateek@gmail.com
-
-## Author
-
-**Prateek Tripathi** — [tripathiprateek@gmail.com](mailto:tripathiprateek@gmail.com)
