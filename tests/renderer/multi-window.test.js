@@ -141,3 +141,38 @@ describe('Multiple instances', () => {
     expect(pkgJson).not.toContain('LSMultipleInstancesProhibited');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Security fixes
+// ---------------------------------------------------------------------------
+
+describe('Security hardening', () => {
+  test('update:open-url validates https scheme and github.com host before openExternal', () => {
+    // Must parse URL and check protocol + hostname before calling shell.openExternal
+    const block = mainSource.match(/update:open-url[\s\S]{0,300}/);
+    expect(block).not.toBeNull();
+    expect(block[0]).toContain('parsed.protocol');
+    expect(block[0]).toContain('https:');
+    expect(block[0]).toContain('github.com');
+  });
+
+  test('no duplicate escapeHTML function — only escapeHtml (lowercase h)', () => {
+    expect(appSource).not.toContain('function escapeHTML(');
+    expect(appSource).toContain('function escapeHtml(');
+  });
+
+  test('DEFAULT_MCP_PORT constant defined — no magic 29419 in app.js', () => {
+    expect(appSource).toContain('const DEFAULT_MCP_PORT = 29419');
+    // Raw magic number should not appear outside the constant definition
+    const withoutDef = appSource.replace('const DEFAULT_MCP_PORT = 29419', '');
+    expect(withoutDef).not.toContain('29419');
+  });
+
+  test('no console.log/warn/error in app.js production code', () => {
+    expect(appSource).not.toMatch(/console\.(log|warn|error)\s*\(/);
+  });
+
+  test('no console.log/warn/error in main.js production code', () => {
+    expect(mainSource).not.toMatch(/console\.(log|warn|error)\s*\(/);
+  });
+});

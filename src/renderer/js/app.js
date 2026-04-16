@@ -445,7 +445,6 @@ const state = {
   currentActions: [],    // Array<{id, name, script}> — actions for profile being edited
   editingActionId: null, // null = new action, string id = editing existing
 
-  // NEW: Tab grouping
   groups: [],  // Array<Group>
   settings: {
     autoGroupByProtocol: true,  // Toggle in Settings
@@ -748,7 +747,7 @@ async function createTab(options = {}) {
     filterTotalCount: 0,
     _filterRegex:     null,
 
-    // NEW: Tab grouping
+    
     groupId: options.groupId || deriveGroupId(protocol, options.connectionProfile),
     displayOrder: state.tabs.length,
   };
@@ -1168,7 +1167,7 @@ function showUploadProgressOverlay(pane, fileName, tab) {
         <line x1="12" y1="12" x2="12" y2="21"></line>
         <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
       </svg>
-      <span class="upload-file-name">${escapeHTML(fileName)}</span>
+      <span class="upload-file-name">${escapeHtml(fileName)}</span>
       <span class="upload-percent">0%</span>
     </div>
     <div class="upload-progress-bar">
@@ -1228,18 +1227,12 @@ function showTransferToast(pane, message, isError) {
   setTimeout(() => toast.remove(), 3000);
 }
 
-function escapeHTML(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
 function removeOverlay(pane, className) {
   const el = pane.querySelector('.' + className);
   if (el) el.remove();
 }
 
-// NEW: Ensure groups are initialized (called before renderTabBar)
+
 function ensureGroupsInitialized() {
   if (!state.groups) state.groups = [];
 
@@ -1275,7 +1268,7 @@ function ensureGroupsInitialized() {
   });
 }
 
-// NEW: Render all tabs organized by groups
+
 function renderTabBar() {
   // Ensure groups are initialized
   ensureGroupsInitialized();
@@ -1518,7 +1511,7 @@ function activateTab(tabId) {
   state.activeTabId = tabId;
   const tab = state.tabs.find(t => t.id === tabId);
 
-  // NEW: Auto-expand group if collapsed
+  
   if (tab && tab.groupId && state.collapsedGroups[tab.groupId]) {
     delete state.collapsedGroups[tab.groupId];
     renderTabBar();  // Re-render to show expanded group
@@ -1545,7 +1538,7 @@ function activateTab(tabId) {
   });
 }
 
-// NEW: Toggle group collapsed state
+
 function toggleGroupCollapsed(groupId) {
   const group = state.groups.find(g => g.id === groupId);
   if (!group) return;
@@ -1718,14 +1711,14 @@ async function restoreSession() {
 
   removeEmptyState();
 
-  // NEW: Migrate old session.json (no groups field)
+  
   if (!session.groups) {
     const protocols = new Set(session.tabs.map(t => t.protocol || 'local'));
     session.groups = getDefaultGroupsForProtocols([...protocols]);
   }
   state.groups = session.groups;
 
-  // NEW: Backfill groupId on old tabs
+  
   for (const saved of session.tabs) {
     if (!saved.groupId) {
       saved.groupId = deriveGroupId(saved.protocol || 'local', null);
@@ -1764,7 +1757,7 @@ async function restoreSession() {
         lastTabId = tab.id;
       }
     } catch (e) {
-      console.error('[session] failed to restore tab:', e);
+      try { window.terminalAPI.logRendererError(`[session] failed to restore tab: ${e?.message}`); } catch {}
     }
   }
 
@@ -3125,7 +3118,7 @@ function populateForm(profile) {
     // then we select the saved port once the list loads
     window.terminalAPI.listSerialPorts().then((ports) => {
       dom.serialPort.innerHTML = ports.length
-        ? ports.map((p) => `<option value="${p.path}"${p.path === profile.serialPort ? ' selected' : ''}>${p.manufacturer ? p.path + ' — ' + p.manufacturer : p.path}</option>`).join('')
+        ? ports.map((p) => `<option value="${escapeHtml(p.path)}"${p.path === profile.serialPort ? ' selected' : ''}>${p.manufacturer ? escapeHtml(p.path) + ' — ' + escapeHtml(p.manufacturer) : escapeHtml(p.path)}</option>`).join('')
         : `<option value="${profile.serialPort || ''}">${profile.serialPort || 'No ports found'}</option>`;
     }).catch(() => {});
   }
@@ -3224,7 +3217,7 @@ function renderProfilesList() {
       </div>
       <div class="profile-item-info">
         <span class="profile-name">${escapeHtml(profile.name)}</span>
-        <span class="profile-host">${escapeHtml(profile.username ? profile.username + '@' : '')}${escapeHtml(profile.host)}${profile.port ? ':' + profile.port : ''}</span>
+        <span class="profile-host">${escapeHtml(profile.username ? profile.username + '@' : '')}${escapeHtml(profile.host)}${profile.port ? ':' + escapeHtml(String(profile.port)) : ''}</span>
       </div>
       <div class="host-tags">${tagDots}</div>
       ${modeBadge}
@@ -3440,7 +3433,7 @@ function saveAction() {
     }
   } else {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    state.currentActions.push({ id, name, script });
+    state.currentActions = [...state.currentActions, { id, name, script }];
   }
   state.editingActionId = null;
   dom.actionEditor.classList.add('hidden');
@@ -3476,8 +3469,8 @@ async function populateSerialPorts() {
       sel.innerHTML = '<option value="">No serial ports found</option>';
     } else {
       sel.innerHTML = ports.map((p) => {
-        const label = p.manufacturer ? `${p.path} — ${p.manufacturer}` : p.path;
-        return `<option value="${p.path}">${label}</option>`;
+        const label = p.manufacturer ? `${escapeHtml(p.path)} — ${escapeHtml(p.manufacturer)}` : escapeHtml(p.path);
+        return `<option value="${escapeHtml(p.path)}">${label}</option>`;
       }).join('');
     }
   } catch {
@@ -3608,12 +3601,12 @@ function setupEventListeners() {
   if (mcpToggle) {
     mcpToggle.addEventListener('change', () => {
       settingsState.mcpEnabled = mcpToggle.checked;
-      settingsState.mcpPort    = parseInt(document.getElementById('settings-mcp-port')?.value || '29419', 10) || 29419;
+      settingsState.mcpPort    = parseInt(document.getElementById('settings-mcp-port')?.value || String(DEFAULT_MCP_PORT), 10) || DEFAULT_MCP_PORT;
       updateMcpStatusBadge(settingsState.mcpEnabled);
     });
   }
   document.getElementById('settings-mcp-port')?.addEventListener('change', (e) => {
-    settingsState.mcpPort = parseInt(e.target.value, 10) || 29419;
+    settingsState.mcpPort = parseInt(e.target.value, 10) || DEFAULT_MCP_PORT;
   });
   document.getElementById('btn-mcp-copy-config')?.addEventListener('click', copyMcpConfig);
   document.getElementById('btn-mcp-register')?.addEventListener('click', registerMcpClients);
@@ -3826,9 +3819,11 @@ function setupEventListeners() {
 
 // ===== Settings =====
 
-let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: 29419 };
+const DEFAULT_MCP_PORT = 29419;
 
-// NEW: Render groups list in Settings > Tab Organization
+let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: DEFAULT_MCP_PORT };
+
+
 function renderGroupsList() {
   const container = document.getElementById('groups-list-container');
   if (!container) return;
@@ -3880,7 +3875,7 @@ function renderGroupsList() {
   }
 }
 
-// NEW: Show dialog to create custom group
+
 function showCreateGroupDialog() {
   const existing = document.getElementById('create-group-dialog');
   if (existing) { existing.remove(); }
@@ -3935,7 +3930,7 @@ function showCreateGroupDialog() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.remove(); });
 }
 
-// NEW: Delete a custom group (moves tabs to first remaining group)
+
 function deleteGroup(groupId) {
   const group = state.groups.find(g => g.id === groupId);
   if (!group || group.isAutoGroup) return;  // Protect auto-groups
@@ -3954,7 +3949,7 @@ function deleteGroup(groupId) {
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
-  settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: 29419, ...s };
+  settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: DEFAULT_MCP_PORT, ...s };
   document.getElementById('settings-profiles-path').value = s.profilesPath || '';
   renderThemePicker(settingsState.theme);
 
@@ -3976,7 +3971,7 @@ async function openSettings() {
     mcpToggle.checked = !!settingsState.mcpEnabled;
     updateMcpStatusBadge(settingsState.mcpEnabled);
   }
-  if (mcpPortEl) mcpPortEl.value = settingsState.mcpPort || 29419;
+  if (mcpPortEl) mcpPortEl.value = settingsState.mcpPort || DEFAULT_MCP_PORT;
 
   setSettingsStatus('');
   modal.classList.remove('hidden');
@@ -3984,7 +3979,7 @@ async function openSettings() {
   // Default terminal status badge
   refreshDefaultTerminalStatus();
 
-  // NEW: Tab Organization section
+  
   renderGroupsList();
   const autoGroupToggle = document.getElementById('settings-auto-group');
   if (autoGroupToggle) {
@@ -4217,7 +4212,6 @@ async function loadDebugLog() {
     }
   } catch (e) {
     contentEl.textContent = 'Error reading log: ' + e.message;
-    console.error('[debug panel] loadDebugLog error:', e);
   }
 }
 
@@ -4280,7 +4274,7 @@ async function importActions() {
     const trimmed = (name || '').trim().slice(0, 20);
     if (!trimmed || existingNames.has(trimmed.toLowerCase())) return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    state.currentActions.push({ id, name: trimmed, script: script || '' });
+    state.currentActions = [...state.currentActions, { id, name: trimmed, script: script || '' }];
     existingNames.add(trimmed.toLowerCase());
     added++;
   });
@@ -4322,7 +4316,6 @@ async function init() {
       }
     } catch { /* non-critical */ }
   } catch (err) {
-    console.error('Failed to initialize:', err);
     // Surface crash to main-process debug log so it shows in Settings → Developer
     try { window.terminalAPI.logRendererError(`init() crash: ${err?.stack || err}`); } catch {}
   }

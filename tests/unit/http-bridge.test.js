@@ -499,7 +499,7 @@ describe('http-bridge — path traversal guard on upload', () => {
 
   afterEach(() => { bridge.stop(); });
 
-  test('returns 403 when localPath is outside home and /tmp (e.g. /etc/passwd)', async () => {
+  test('returns 403 when localPath is outside home and os.tmpdir() (e.g. /etc/passwd)', async () => {
     if (!port) return;
     const res = await httpPost(port, '/upload', token, {
       profileName: 'Router', localPath: '/etc/passwd', remotePath: '/tmp/passwd',
@@ -517,10 +517,10 @@ describe('http-bridge — path traversal guard on upload', () => {
     expect(res.status).not.toBe(403);
   });
 
-  test('does not return 403 for localPath under /tmp', async () => {
+  test('does not return 403 for localPath under os.tmpdir()', async () => {
     if (!port) return;
     const res = await httpPost(port, '/upload', token, {
-      profileName: 'Router', localPath: '/tmp/file.txt', remotePath: '/tmp/file.txt',
+      profileName: 'Router', localPath: path.join(os.tmpdir(), 'file.txt'), remotePath: '/tmp/file.txt',
     });
     expect(res.status).not.toBe(403);
   });
@@ -551,7 +551,7 @@ describe('http-bridge — path traversal guard on download', () => {
 
   afterEach(() => { bridge.stop(); });
 
-  test('returns 403 when localPath is outside home and /tmp (e.g. /etc/shadow)', async () => {
+  test('returns 403 when localPath is outside home and os.tmpdir() (e.g. /etc/shadow)', async () => {
     if (!port) return;
     const res = await httpPost(port, '/download', token, {
       profileName: 'Router', remotePath: '/etc/shadow', localPath: '/etc/shadow',
@@ -564,6 +564,14 @@ describe('http-bridge — path traversal guard on download', () => {
     if (!port) return;
     const res = await httpPost(port, '/download', token, {
       profileName: 'Router', remotePath: '/tmp/data.bin', localPath: `${os.homedir()}/data.bin`,
+    });
+    expect(res.status).not.toBe(403);
+  });
+
+  test('does not return 403 for localPath under os.tmpdir()', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/download', token, {
+      profileName: 'Router', remotePath: '/tmp/data.bin', localPath: path.join(os.tmpdir(), 'data.bin'),
     });
     expect(res.status).not.toBe(403);
   });

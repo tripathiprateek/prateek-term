@@ -184,8 +184,8 @@ function send(res, status, body) {
 function validateLocalPath(localPath) {
   const resolved = path.resolve(localPath);
   const home = os.homedir();
-  if (!resolved.startsWith(home) && !resolved.startsWith('/tmp')) {
-    return 'localPath must be within home directory or /tmp';
+  if (!resolved.startsWith(home) && !resolved.startsWith(os.tmpdir())) {
+    return 'localPath must be within home directory or temp directory';
   }
   return null;
 }

@@ -295,7 +295,7 @@ function installQuickActionIfNeeded() {
     // Notify macOS to refresh the Services menu
     exec('/System/Library/CoreServices/pbs -update', () => {});
   } catch (e) {
-    console.warn('Quick Action install skipped:', e.message);
+    dbgLog('[quick-action] install skipped: ' + e.message);
   }
 }
 
@@ -315,7 +315,7 @@ function loadSettings() {
       return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
     }
   } catch (e) {
-    console.error('Failed to load settings:', e);
+    dbgLog('[settings] load failed: ' + e.message);
   }
   return {};
 }
@@ -324,7 +324,7 @@ function saveSettings(settings) {
   try {
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
   } catch (e) {
-    console.error('Failed to save settings:', e);
+    dbgLog('[settings] save failed: ' + e.message);
   }
 }
 
@@ -613,7 +613,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     dbgLog(`[pty:${id}] spawned pid=${term.pid} shell="${shell}" cwd="${cwd}"`);
   } catch (err) {
     dbgLog(`[pty:${id}] spawn failed shell="${shell}" cwd="${cwd}" err="${err.message}" — falling back to /bin/sh`);
-    console.error(`Failed to spawn shell "${shell}" in "${cwd}":`, err.message);
+    dbgLog(`[pty] Failed to spawn shell "${shell}" in "${cwd}": ${err.message}`);
     term = pty.spawn('/bin/sh', args, {
       name: 'xterm-256color',
       cols: options.cols || 80,
@@ -743,7 +743,7 @@ function loadProfiles() {
     dbgLog(`[profiles] no file at "${p}" — returning empty list`);
   } catch (e) {
     dbgLog(`[profiles] ERROR loading from "${p}": ${e.message}`);
-    console.error('Failed to load profiles:', e);
+    dbgLog('[profiles] load failed: ' + e.message);
   }
   return [];
 }
@@ -757,7 +757,7 @@ function saveProfiles(profiles) {
     dbgLog(`[profiles] saved ${profiles.length} profiles to "${p}"`);
   } catch (e) {
     dbgLog(`[profiles] ERROR saving to "${p}": ${e.message}`);
-    console.error('Failed to save profiles:', e);
+    dbgLog('[profiles] save failed: ' + e.message);
   }
 }
 
@@ -792,7 +792,7 @@ ipcMain.handle('settings:save', (event, settings) => {
         dbgLog(`[settings] migrated profiles file to "${newPath}"`);
       } catch (e) {
         dbgLog(`[settings] ERROR migrating profiles file: ${e.message}`);
-        console.error('Failed to migrate profiles file:', e);
+        dbgLog('[profiles] migration failed: ' + e.message);
       }
     }
   }
@@ -1019,7 +1019,7 @@ ipcMain.handle('profiles:import-ssh-config', async () => {
     const text = fs.readFileSync(res.filePaths[0], 'utf-8');
     return parseSSHConfig(text);
   } catch (e) {
-    console.error('SSH config import failed:', e);
+    dbgLog('[ssh-config] import failed: ' + e.message);
     return null;
   }
 });
@@ -1197,7 +1197,14 @@ ipcMain.handle('defaultTerminal:set', () => {
 // ── Update IPC ───────────────────────────────────────────────────────────
 ipcMain.handle('update:check',       (_, opts) => checkForUpdates(opts?.includePrerelease));
 ipcMain.handle('update:get-version', ()        => getVersionInfo());
-ipcMain.on(   'update:open-url',     (_, url)  => shell.openExternal(url));
+ipcMain.on(   'update:open-url',     (_, url)  => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:' && parsed.hostname === 'github.com') {
+      shell.openExternal(url);
+    }
+  } catch { /* invalid URL — ignore */ }
+});
 
 ipcMain.handle('dialog:openFile', async (event, options = {}) => {
   const result = await dialog.showOpenDialog(mainWindow, {
