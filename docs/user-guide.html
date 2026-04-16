@@ -753,6 +753,8 @@
       <li><a href="#import-export">Import &amp; Export</a></li>
       <li><a href="#settings">Settings &amp; Themes</a></li>
       <li><a href="#mcp">AI / MCP Integration</a></li>
+      <li><a href="#session-persistence">Session Persistence</a></li>
+      <li><a href="#default-terminal">Default Terminal (macOS)</a></li>
     </ol>
   </nav>
 
@@ -790,7 +792,7 @@
       </div>
       <div class="feature-desc">
         <h3>Multi-tab workflow</h3>
-        <p>Every tab is a full PTY — resize, scroll, paste, and log independently.</p>
+        <p>Every tab is a full PTY — resize, scroll, paste, and log independently. When Prateek-Term is set as your <a href="#default-terminal" style="color:var(--accent); text-decoration:none;">default terminal</a>, right-clicking any folder in Finder's path bar and choosing <strong>Open in Terminal</strong> opens a new tab directly at that folder path.</p>
         <ul class="steps">
           <li><span class="step-num">1</span>Press <kbd>⌘T</kbd> to open a new local terminal tab.</li>
           <li><span class="step-num">2</span>Click any tab to switch; the terminal resizes to fit automatically.</li>
@@ -1552,6 +1554,202 @@
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">&#128268;</span>
           <p><strong>Standalone server:</strong> When registered via the Settings panel, Prateek-Term copies the MCP server to <code>~/.prateek-term/mcp/</code> with its own dependencies, ensuring it works independently of the app bundle.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       12 — SESSION PERSISTENCE
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="session-persistence">
+    <div class="section-label">12</div>
+    <h2>Session Persistence</h2>
+    <p class="section-intro">Prateek-Term saves all open tabs when the window closes and restores them automatically on next launch — so you never lose your workspace.</p>
+
+    <!-- Feature 1: How it works -->
+    <div class="feature-card">
+      <div class="feature-demo" style="min-height:200px;">
+        <div class="mock-window" style="max-width:560px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">Prateek-Term — Restored</div>
+          </div>
+          <div class="mock-tabs">
+            <div class="mock-tab active" style="animation:tabAppear 0.4s 0.4s cubic-bezier(0.34,1.56,0.64,1) both;">
+              <span class="mock-tab-badge local">LOCAL</span> ~/projects
+            </div>
+            <div class="mock-tab" style="animation:tabAppear 0.4s 0.8s cubic-bezier(0.34,1.56,0.64,1) both;">
+              <span class="mock-tab-badge ssh">SSH</span> prod-server
+            </div>
+            <div class="mock-tab" style="animation:tabAppear 0.4s 1.2s cubic-bezier(0.34,1.56,0.64,1) both;">
+              <span class="mock-tab-badge ssh">SSH</span> router-01
+            </div>
+          </div>
+          <div class="mock-terminal" style="min-height:120px;">
+            <div style="animation:fadeUp 0.4s 1.6s both; color:#a6e3a1; font-size:11px; margin-bottom:6px;">&#10003; Session restored — 3 tabs</div>
+            <div style="animation:fadeUp 0.4s 2.0s both;"><span class="mock-prompt">~/projects</span> $ <span class="cursor"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Automatic restore on launch</h3>
+        <p>All tabs — local and SSH — are saved on quit and reopen automatically. Local shells restore scrollback history (last 300 lines) and reopen in the same working directory. SSH and Telnet tabs reconnect to the same profile.</p>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Open any tabs (local or SSH).</li>
+          <li><span class="step-num">2</span>Quit Prateek-Term (<kbd>⌘Q</kbd>).</li>
+          <li><span class="step-num">3</span>Reopen — all tabs reconnect automatically.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Feature 2: Details & storage -->
+    <div class="feature-card">
+      <div class="feature-desc" style="padding:20px 24px 24px;">
+        <h3>How session data is saved</h3>
+        <p style="margin-bottom:14px;">Session state is written to disk on quit and read back on launch. Here is what each tab type preserves:</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px;">
+          <div style="display:flex; align-items:flex-start; gap:8px; font-size:13px;">
+            <span class="badge badge-local" style="flex-shrink:0; margin-top:1px;">LOCAL</span>
+            <span style="color:var(--text-muted);">Shell reopened in same working directory; last 300 lines of scrollback restored.</span>
+          </div>
+          <div style="display:flex; align-items:flex-start; gap:8px; font-size:13px;">
+            <span class="badge badge-ssh" style="flex-shrink:0; margin-top:1px;">SSH</span>
+            <span style="color:var(--text-muted);">Reconnects to the same profile automatically. PEM key sessions re-save the pasted key to a temp file so auth works without re-pasting.</span>
+          </div>
+          <div style="display:flex; align-items:flex-start; gap:8px; font-size:13px;">
+            <span class="badge badge-telnet" style="flex-shrink:0; margin-top:1px;">TELNET</span>
+            <span style="color:var(--text-muted);">Reconnects to the same host and port from the saved profile.</span>
+          </div>
+          <div style="display:flex; align-items:flex-start; gap:8px; font-size:13px;">
+            <span class="badge badge-serial" style="flex-shrink:0; margin-top:1px;">SERIAL</span>
+            <span style="color:var(--text-muted);">Profile is restored; reconnects when the port is available.</span>
+          </div>
+        </div>
+        <div class="tip">
+          <span class="tip-icon">&#128196;</span>
+          <p><strong>Storage location:</strong> Session data is stored at <code style="color:var(--accent); font-family:'SF Mono','Fira Code',monospace;">~/Library/Application Support/prateek-term/session.json</code>. To clear the saved session, close all tabs before quitting — an empty tab state means nothing is saved.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       13 — DEFAULT TERMINAL (macOS)
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="default-terminal">
+    <div class="section-label">13</div>
+    <h2>Default Terminal (macOS)</h2>
+    <p class="section-intro">Make Prateek-Term the terminal that opens when you choose "Open in Terminal" from Finder, double-click shell scripts, or trigger any macOS "open in terminal" action.</p>
+
+    <!-- Feature 1: Set as default -->
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-demo" style="min-height:200px; flex-direction:column; gap:16px;">
+          <div class="mock-window" style="max-width:360px;">
+            <div class="mock-titlebar">
+              <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+              <div class="mock-title">Settings — General</div>
+            </div>
+            <div class="mock-form" style="padding:14px; gap:10px;">
+              <div class="mock-settings-row">
+                <div class="mock-settings-label">Startup shell</div>
+                <div class="mock-settings-value">/bin/zsh</div>
+              </div>
+              <div class="mock-settings-row">
+                <div class="mock-settings-label">Font size</div>
+                <div class="mock-settings-value">13 px</div>
+              </div>
+              <div style="margin-top:6px;">
+                <div class="mock-btn primary" style="animation:pulseGlow 1.8s 0.8s infinite; font-size:12px;">&#128204; Set as Default Terminal</div>
+              </div>
+              <div style="animation:fadeUp 0.4s 1.6s both; display:flex; align-items:center; gap:6px; font-size:12px;">
+                <span style="color:#a6e3a1;">&#10003;</span>
+                <span style="color:#cdd6f4;">System dialog confirmed</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-desc">
+          <h3>Via Settings</h3>
+          <p>The fastest way: open Settings, go to the General tab, and click <strong>Set as Default Terminal</strong>. A macOS system confirmation dialog will appear — click OK to confirm.</p>
+          <ul class="steps">
+            <li><span class="step-num">1</span>Open Settings (<kbd>⌘,</kbd>).</li>
+            <li><span class="step-num">2</span>Go to the <strong>General</strong> tab.</li>
+            <li><span class="step-num">3</span>Click <strong>Set as Default Terminal</strong>.</li>
+            <li><span class="step-num">4</span>Confirm in the macOS system dialog.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-demo" style="min-height:200px; flex-direction:column; justify-content:center; gap:12px;">
+          <div style="text-align:center;">
+            <div style="font-size:12px; color:#7f849c; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.06em; font-weight:700;">System Settings path</div>
+            <div style="display:flex; flex-direction:column; gap:6px; align-items:center; font-size:13px; color:#cdd6f4;">
+              <div style="background:#252538; border:1px solid #3a3a5c; border-radius:8px; padding:5px 14px; width:220px; text-align:center;">System Settings</div>
+              <div style="color:#7f849c;">&#8595;</div>
+              <div style="background:#252538; border:1px solid #3a3a5c; border-radius:8px; padding:5px 14px; width:220px; text-align:center;">General</div>
+              <div style="color:#7f849c;">&#8595;</div>
+              <div style="background:#252538; border:1px solid #3a3a5c; border-radius:8px; padding:5px 14px; width:220px; text-align:center;">Default Apps</div>
+              <div style="color:#7f849c;">&#8595;</div>
+              <div style="background:rgba(137,180,250,0.15); border:1px solid rgba(137,180,250,0.4); border-radius:8px; padding:5px 14px; width:220px; text-align:center; color:#89b4fa; font-weight:600; animation:pulseGlow 1.8s 1s infinite;">Terminal → Prateek-Term</div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-desc">
+          <h3>Via System Settings</h3>
+          <p>Alternatively, set it manually: open <strong>System Settings → General → Default Apps → Terminal</strong> and select Prateek-Term from the list. To revert, select Terminal.app from the same menu.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature 2: What it enables -->
+    <div class="feature-card">
+      <div class="feature-demo" style="min-height:180px; flex-direction:column; gap:16px; align-items:flex-start; padding:28px;">
+        <div style="display:flex; align-items:flex-start; gap:16px; width:100%; max-width:520px;">
+          <!-- Finder path bar mock -->
+          <div style="flex:1;">
+            <div style="font-size:10px; color:#7f849c; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">Finder path bar</div>
+            <div style="background:#252538; border:1px solid #3a3a5c; border-radius:8px; padding:6px 10px; display:flex; align-items:center; gap:6px; font-size:12px; color:#cdd6f4;">
+              <span style="color:#7f849c;">&#127968;</span>
+              <span style="color:#7f849c;">&#62;</span>
+              <span>projects</span>
+              <span style="color:#7f849c;">&#62;</span>
+              <span style="background:rgba(137,180,250,0.15); border:1px solid rgba(137,180,250,0.3); border-radius:5px; padding:1px 7px; color:#89b4fa;">my-app</span>
+            </div>
+          </div>
+          <!-- Context menu mock -->
+          <div style="animation:menuDrop 0.35s 0.8s cubic-bezier(0.34,1.2,0.64,1) both;">
+            <div class="mock-ctx-menu" style="min-width:200px;">
+              <div class="mock-ctx-item">Get Info</div>
+              <div class="mock-ctx-divider"></div>
+              <div class="mock-ctx-item active">Open in Terminal</div>
+              <div class="mock-ctx-item">New Terminal Tab Here</div>
+              <div class="mock-ctx-divider"></div>
+              <div class="mock-ctx-item">Copy "my-app"</div>
+            </div>
+          </div>
+        </div>
+        <div style="animation:fadeUp 0.4s 1.8s both; display:flex; align-items:center; gap:8px; font-size:12px;">
+          <span style="color:#a6e3a1;">&#10003;</span>
+          <span style="color:#cdd6f4;">New Prateek-Term tab opened at <code style="color:#89b4fa; font-family:'SF Mono','Fira Code',monospace;">~/projects/my-app</code></span>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>What becomes available once set as default</h3>
+        <p style="margin-bottom:12px;">After setting Prateek-Term as the system default terminal, the following all open a new tab at the correct path:</p>
+        <ul class="steps">
+          <li><span class="step-num">&#10003;</span>Finder path-bar right-click → <strong>Open in Terminal</strong> opens at that exact folder.</li>
+          <li><span class="step-num">&#10003;</span>Double-clicking <code style="font-family:'SF Mono','Fira Code',monospace;">.sh</code>, <code style="font-family:'SF Mono','Fira Code',monospace;">.command</code>, or <code style="font-family:'SF Mono','Fira Code',monospace;">.zsh</code> files runs them in a new tab.</li>
+          <li><span class="step-num">&#10003;</span><code style="font-family:'SF Mono','Fira Code',monospace;">open -b com.prateek.prateekterm /path</code> opens a tab at the specified path.</li>
+          <li><span class="step-num">&#10003;</span>Finder Services menu shows <strong>New Prateek-Term Window Here</strong> / <strong>New Prateek-Term Tab Here</strong> (install the Automator Quick Action from the Help menu).</li>
+        </ul>
+        <div class="tip">
+          <span class="tip-icon">&#8617;</span>
+          <p><strong>To revert:</strong> Open <strong>System Settings → General → Default Apps → Terminal</strong> and select Terminal.app.</p>
         </div>
       </div>
     </div>

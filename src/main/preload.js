@@ -143,6 +143,9 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   mcpStatus:   () => ipcRenderer.invoke('mcp:status'),
   mcpRegister: () => ipcRenderer.invoke('mcp:register'),
 
+  // ── Renderer error logging ────────────────────────────────────────────────
+  logRendererError: (msg) => ipcRenderer.send('debug:rendererError', msg),
+
   // ── Default Terminal ─────────────────────────────────────────────────────
   isDefaultTerminal: () => ipcRenderer.invoke('defaultTerminal:isDefault'),
   setDefaultTerminal: () => ipcRenderer.invoke('defaultTerminal:set'),

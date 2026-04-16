@@ -1469,7 +1469,7 @@ async function restoreSession() {
   // Re-activate the previously active tab
   const target = state.tabs.find(t => t.name === session.tabs.find((s, i) =>
     state.tabs[i]?.id === state.activeTabId)?.name) || state.tabs[0];
-  if (target) switchTab(target.id);
+  if (target) activateTab(target.id);
 }
 
 // ===== Add Selection as Action (mini-dialog) =====
@@ -3833,7 +3833,12 @@ async function init() {
   try {
     await loadXtermModules();
     setupTerminalListeners();
-    setupEventListeners();
+    try {
+      setupEventListeners();
+    } catch (e) {
+      try { window.terminalAPI.logRendererError(`setupEventListeners crash: ${e?.stack || e}`); } catch {}
+      throw e;
+    }
     // Apply saved theme before rendering anything
     const savedSettings = await window.terminalAPI.loadSettings();
     state.currentTheme = savedSettings.theme || 'catppuccin-mocha';
@@ -3857,6 +3862,8 @@ async function init() {
     } catch { /* non-critical */ }
   } catch (err) {
     console.error('Failed to initialize:', err);
+    // Surface crash to main-process debug log so it shows in Settings → Developer
+    try { window.terminalAPI.logRendererError(`init() crash: ${err?.stack || err}`); } catch {}
   }
 }
 

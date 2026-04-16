@@ -1158,6 +1158,11 @@ ipcMain.handle('help:open', () => {
   helpWindow.on('closed', () => { helpWindow = null; });
 });
 
+// ── Renderer error bridge ────────────────────────────────────────────────
+ipcMain.on('debug:rendererError', (_, msg) => {
+  dbgLog(`[renderer-error] ${msg}`);
+});
+
 // ── Default Terminal IPC ─────────────────────────────────────────────────
 
 ipcMain.handle('defaultTerminal:isDefault', () => {
