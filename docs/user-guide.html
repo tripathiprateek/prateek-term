@@ -733,7 +733,7 @@
 <!-- ╚══════════════════════════════╝ -->
 <div class="page-wrap">
   <div class="hero">
-    <div class="hero-badge">User Guide · v1.2.0</div>
+    <div class="hero-badge">User Guide · v1.2.1</div>
     <h1>Prateek-Term</h1>
     <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
   </div>
@@ -747,6 +747,7 @@
       <li><a href="#ssh">SSH Connections</a></li>
       <li><a href="#serial">Serial / COM Devices</a></li>
       <li><a href="#tags">Tags &amp; Filtering</a></li>
+      <li><a href="#tab-groups">Tab Groups</a></li>
       <li><a href="#actions">Actions per Profile</a></li>
       <li><a href="#run-action">Running Actions</a></li>
       <li><a href="#sel-action">Add Selection as Action</a></li>
@@ -1062,6 +1063,27 @@
       </div>
     </div>
   </div>
+
+  <!-- ════════════════════════════════════════════
+       TAB GROUPS
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="tab-groups">
+  <h2>Tab Groups</h2>
+  <p class="section-intro">Tabs are automatically organised into groups based on your connection profile tags — keeping LOCAL terminals, AWS servers, and HOME devices visually separated.</p>
+  <div class="feature-card">
+    <div class="feature-text">
+      <h3>Automatic grouping by tag</h3>
+      <p>When you open a connection, Prateek-Term reads the first tag on its profile and places the tab in the matching group. Connections without tags fall back to protocol groups (Local, SSH, etc.).</p>
+      <h3>Group label chips</h3>
+      <p>Each group shows a small colored label chip (e.g. <strong>HOME</strong>, <strong>AWS</strong>) at the left edge. The chip color matches the tag color. Click the chip to collapse or expand the group.</p>
+      <h3>Drag between groups</h3>
+      <p>Drag any tab and drop it onto a different group to reassign it. The target group highlights as you drag. Collapsed groups auto-expand on drop.</p>
+      <h3>Manage groups in Settings</h3>
+      <p>Open Settings → Tab Organization to rename groups, change colors, create custom groups, or delete user-created groups. Toggle <strong>Auto-group by protocol</strong> to switch between tag-based and protocol-based grouping.</p>
+    </div>
+  </div>
+</div>
 
   <!-- ════════════════════════════════════════════
        6 — ACTIONS PER PROFILE
@@ -1757,7 +1779,7 @@
 
   <!-- ── Footer ── -->
   <div class="footer">
-    <p>Prateek-Term v1.2.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p>Prateek-Term v1.2.1 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
     <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
   </div>
 

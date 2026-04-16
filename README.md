@@ -30,6 +30,7 @@ No plugins. No wrappers. Built in.
 ### Terminal
 - **xterm.js** with 256-color / true-color support, Catppuccin Mocha theme
 - **Multi-tab** (`Cmd+T`) and **multi-window** (tear off any tab)
+- **Tab groups** — tabs auto-grouped by connection tags (HOME, AWS, etc.) with colored labels; drag tabs between groups, collapse/expand groups
 - **Bracketed paste** for safe multi-line input
 - **Middle-click paste** from clipboard
 
@@ -97,7 +98,7 @@ Claude: "Connect to my staging server and check disk usage"
 ```bash
 npm install          # install dependencies
 npm start            # run in development mode
-npm test             # run test suite (175 tests)
+npm test             # run test suite (354 tests)
 npm run lint         # lint source
 ```
 
