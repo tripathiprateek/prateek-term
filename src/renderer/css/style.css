@@ -266,6 +266,45 @@ body {
   color: white;
 }
 
+/* ===== Tab Grouping ===== */
+
+/* Tab group container */
+.tab-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Group separator (thin colored line on left) */
+.tab-group-separator {
+  width: 3px;
+  height: 24px;
+  border-left: 2px solid currentColor;  /* Inherits group color */
+  margin: 0 4px 0 0;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+/* Collapsed group: hide tabs, show only separator */
+.tab-group.collapsed {
+  display: flex;
+  gap: 0;
+}
+
+.tab-group.collapsed .tab {
+  display: none;
+}
+
+/* Divider between groups */
+.tab-group-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--bg-surface);
+  margin: 0 6px;
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
 /* ===== Main Area (Sidebar + Terminal) ===== */
 #main-area {
   display: flex;

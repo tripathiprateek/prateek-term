@@ -44,14 +44,14 @@ describe('activateTab vs switchTab naming', () => {
 describe('restoreSession — calls activateTab (not switchTab)', () => {
   test('restoreSession calls activateTab to re-activate the last tab', () => {
     // Find the restoreSession function body and assert activateTab is called there
-    // Function is ~1500 chars; use a wide window to capture the final activateTab call
-    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,2000}/);
+    // Function is ~2500 chars after migration code; use larger window to capture the final activateTab call
+    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,3000}/);
     expect(restoreBlock).not.toBeNull();
     expect(restoreBlock[0]).toContain('activateTab');
   });
 
   test('restoreSession does NOT call switchTab', () => {
-    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,2000}/);
+    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,3000}/);
     expect(restoreBlock).not.toBeNull();
     expect(restoreBlock[0]).not.toContain('switchTab');
   });

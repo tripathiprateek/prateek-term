@@ -444,7 +444,56 @@ const state = {
   collapsedGroups: {}, // track collapsed protocol groups
   currentActions: [],    // Array<{id, name, script}> — actions for profile being edited
   editingActionId: null, // null = new action, string id = editing existing
+
+  // NEW: Tab grouping
+  groups: [],  // Array<Group>
+  settings: {
+    autoGroupByProtocol: true,  // Toggle in Settings
+  },
 };
+
+// ===== Tab Grouping Helpers =====
+
+function getProtocolColor(protocol) {
+  const colorMap = {
+    'local': '#45475a',   // Catppuccin Surface0
+    'ssh': '#89b4fa',     // Catppuccin Blue
+    'serial': '#f38ba8',  // Catppuccin Red
+    'telnet': '#f9e2af',  // Catppuccin Yellow
+    'ftp': '#a6e3a1',     // Catppuccin Green
+  };
+  return colorMap[protocol] || '#6c7086';
+}
+
+function deriveGroupId(protocol, connectionProfile) {
+  if (protocol === 'local') return 'group-local';
+  if (protocol === 'serial') return 'group-serial';
+  // SSH might have special modes (SCP, SFTP, etc.)
+  if (connectionProfile?.sshMode) {
+    return `group-${connectionProfile.sshMode}`;
+  }
+  return `group-${protocol}`;
+}
+
+function getDefaultGroupsForProtocols(protocols) {
+  const groups = [];
+  const PROTOCOL_ORDER = ['local', 'ssh', 'serial', 'telnet', 'ftp'];
+
+  for (const proto of PROTOCOL_ORDER) {
+    if (!protocols.includes(proto)) continue;
+
+    groups.push({
+      id: `group-${proto}`,
+      name: proto.charAt(0).toUpperCase() + proto.slice(1),  // "ssh" → "SSH"
+      protocol: proto,
+      isAutoGroup: true,
+      color: getProtocolColor(proto),
+      isCollapsed: false,
+      displayOrder: groups.length,
+    });
+  }
+  return groups;
+}
 
 let tabIdCounter = 0;
 
@@ -661,6 +710,10 @@ async function createTab(options = {}) {
     filterMatchCount: 0,
     filterTotalCount: 0,
     _filterRegex:     null,
+
+    // NEW: Tab grouping
+    groupId: options.groupId || deriveGroupId(protocol, options.connectionProfile),
+    displayOrder: state.tabs.length,
   };
 
   if (isSerial) {
@@ -681,7 +734,7 @@ async function createTab(options = {}) {
       term.write(`\r\n\x1b[31m[Failed to open serial port: ${err.message}]\x1b[0m\r\n`);
       tab.ptyId = null;
       state.tabs.push(tab);
-      renderTab(tab);
+      renderTabBar();  // Render all tabs in groups
       activateTab(tabId);
       return;
     }
@@ -847,7 +900,7 @@ async function createTab(options = {}) {
 
   state.tabs.push(tab);
   flushPendingTerminalEvents(tab);
-  renderTab(tab);
+  renderTabBar();  // Render all tabs in groups
   activateTab(tabId);
 
   const resizeObserver = new ResizeObserver(() => {
@@ -1149,7 +1202,78 @@ function removeOverlay(pane, className) {
   if (el) el.remove();
 }
 
-function renderTab(tab) {
+// NEW: Ensure groups are initialized (called before renderTabBar)
+function ensureGroupsInitialized() {
+  if (state.groups && state.groups.length > 0) return;
+
+  // Auto-generate groups based on current tab protocols
+  const protocols = new Set(state.tabs.map(t => t.protocol || 'local'));
+  if (protocols.size === 0) return;  // No tabs yet
+
+  state.groups = getDefaultGroupsForProtocols([...protocols]);
+
+  // Assign tabs to their groups if not already assigned
+  state.tabs.forEach(tab => {
+    if (!tab.groupId) {
+      tab.groupId = deriveGroupId(tab.protocol, tab.connectionProfile);
+    }
+  });
+}
+
+// NEW: Render all tabs organized by groups
+function renderTabBar() {
+  // Ensure groups are initialized
+  ensureGroupsInitialized();
+
+  // Clear existing tabs
+  dom.tabsContainer.innerHTML = '';
+
+  // If no groups defined, return empty tab bar
+  if (!state.groups || state.groups.length === 0) {
+    return;
+  }
+
+  // Sort groups by displayOrder
+  const sortedGroups = [...state.groups].sort((a, b) => a.displayOrder - b.displayOrder);
+
+  for (let i = 0; i < sortedGroups.length; i++) {
+    const group = sortedGroups[i];
+
+    // Render group container
+    const groupEl = document.createElement('div');
+    groupEl.className = 'tab-group';
+    groupEl.dataset.groupId = group.id;
+    if (state.collapsedGroups[group.id]) {
+      groupEl.classList.add('collapsed');
+    }
+
+    // Group separator (thin colored line on left)
+    const separator = document.createElement('div');
+    separator.className = 'tab-group-separator';
+    separator.style.borderLeftColor = group.color;
+    groupEl.appendChild(separator);
+
+    // Render tabs in this group
+    const tabsInGroup = state.tabs
+      .filter(t => t.groupId === group.id)
+      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+
+    for (const tab of tabsInGroup) {
+      renderTab(tab, groupEl);  // Append to group, not container
+    }
+
+    dom.tabsContainer.appendChild(groupEl);
+
+    // Add separator between groups (except after last)
+    if (i < sortedGroups.length - 1) {
+      const groupSep = document.createElement('div');
+      groupSep.className = 'tab-group-divider';
+      dom.tabsContainer.appendChild(groupSep);
+    }
+  }
+}
+
+function renderTab(tab, parentEl = null) {
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.dataset.tabId = tab.id;
@@ -1252,11 +1376,18 @@ function renderTab(tab) {
   tabEl.appendChild(protocolBadge);
   tabEl.appendChild(titleSpan);
   tabEl.appendChild(closeBtn);
-  dom.tabsContainer.appendChild(tabEl);
+  (parentEl || dom.tabsContainer).appendChild(tabEl);
 }
 
 function activateTab(tabId) {
   state.activeTabId = tabId;
+  const tab = state.tabs.find(t => t.id === tabId);
+
+  // NEW: Auto-expand group if collapsed
+  if (tab && tab.groupId && state.collapsedGroups[tab.groupId]) {
+    delete state.collapsedGroups[tab.groupId];
+    renderTabBar();  // Re-render to show expanded group
+  }
 
   document.querySelectorAll('.tab').forEach((el) => {
     el.classList.toggle('active', parseInt(el.dataset.tabId) === tabId);
@@ -1277,6 +1408,21 @@ function activateTab(tabId) {
       });
     }
   });
+}
+
+// NEW: Toggle group collapsed state
+function toggleGroupCollapsed(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group) return;
+
+  if (state.collapsedGroups[groupId]) {
+    delete state.collapsedGroups[groupId];
+  } else {
+    state.collapsedGroups[groupId] = true;
+  }
+
+  renderTabBar();
+  saveSessionSync(buildSessionData());
 }
 
 function closeTab(tabId) {
@@ -1404,11 +1550,17 @@ function buildSessionData() {
     .map(t => ({
       protocol:          t.protocol || 'local',
       name:              t.name,
+      groupId:           t.groupId,  // NEW
       connectionProfileId: t.connectionProfile?.id || null,
       scrollback:        captureScrollback(t.term),
       cwd:               t._lastCwd || null,
     }));
-  return { savedAt: new Date().toISOString(), activeTabId: state.activeTabId, tabs };
+  return {
+    savedAt: new Date().toISOString(),
+    activeTabId: state.activeTabId,
+    groups: state.groups,  // NEW
+    tabs,
+  };
 }
 
 function writeScrollbackHistory(tab, lines) {
@@ -1430,6 +1582,21 @@ async function restoreSession() {
   }
 
   removeEmptyState();
+
+  // NEW: Migrate old session.json (no groups field)
+  if (!session.groups) {
+    const protocols = new Set(session.tabs.map(t => t.protocol || 'local'));
+    session.groups = getDefaultGroupsForProtocols([...protocols]);
+  }
+  state.groups = session.groups;
+
+  // NEW: Backfill groupId on old tabs
+  for (const saved of session.tabs) {
+    if (!saved.groupId) {
+      saved.groupId = deriveGroupId(saved.protocol || 'local', null);
+    }
+  }
+
   let lastTabId = null;
 
   for (const saved of session.tabs) {
@@ -2273,7 +2440,7 @@ async function adoptTab(tearOffData) {
 
   state.tabs.push(tab);
   flushPendingTerminalEvents(tab);
-  renderTab(tab);
+  renderTabBar();  // Render all tabs in groups
   activateTab(tabId);
 
   const resizeObserver = new ResizeObserver(() => {
