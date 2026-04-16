@@ -1307,6 +1307,8 @@ function renderTab(tab, parentEl = null) {
     let tearOff  = false;
     let ghost    = null;
 
+    let lastHighlightedGroup = null;  // Track currently highlighted group
+
     const onMove = (ev) => {
       const dy = Math.abs(ev.clientY - e.clientY);
       const dx = Math.abs(ev.clientX - e.clientX);
@@ -1325,10 +1327,27 @@ function renderTab(tab, parentEl = null) {
         tearOff = true;
         ghost.classList.add('tear-off');
         ghost.textContent = `${tab.name}  →  New Window`;
+        // Clear group highlight when going into tear-off
+        if (lastHighlightedGroup) {
+          lastHighlightedGroup.classList.remove('drop-target');
+          lastHighlightedGroup = null;
+        }
       } else {
         tearOff = false;
         ghost.classList.remove('tear-off');
         ghost.textContent = tab.name;
+        // Highlight drop target group (NEW)
+        const targetGroupEl = document.elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest('.tab-group');
+        if (targetGroupEl !== lastHighlightedGroup) {
+          if (lastHighlightedGroup) lastHighlightedGroup.classList.remove('drop-target');
+          if (targetGroupEl && targetGroupEl.dataset.groupId !== tab.groupId) {
+            targetGroupEl.classList.add('drop-target');
+            lastHighlightedGroup = targetGroupEl;
+          } else {
+            lastHighlightedGroup = null;
+          }
+        }
       }
     };
 
@@ -1339,6 +1358,11 @@ function renderTab(tab, parentEl = null) {
       document.removeEventListener('mousemove', onMove, OPTS);
       document.removeEventListener('mouseup', onUp, OPTS);
       if (ghost) { ghost.remove(); ghost = null; }
+      // Clear any group highlight
+      if (lastHighlightedGroup) {
+        lastHighlightedGroup.classList.remove('drop-target');
+        lastHighlightedGroup = null;
+      }
       if (tearOff) {
         ev.stopPropagation();
         ev.preventDefault();
@@ -1366,6 +1390,27 @@ function renderTab(tab, parentEl = null) {
         await window.terminalAPI.openNewWindow(tearOffData);
         // Detach without killing the PTY — the new window will adopt it
         detachTab(tab.id);
+      } else if (dragging) {
+        // NEW: Handle group reassignment on drop
+        const targetGroupEl = document.elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest('.tab-group');
+        if (targetGroupEl) {
+          const targetGroupId = targetGroupEl.dataset.groupId;
+          if (targetGroupId && targetGroupId !== tab.groupId) {
+            // Move tab to new group
+            tab.groupId = targetGroupId;
+            // Auto-expand target group if collapsed
+            if (state.collapsedGroups[targetGroupId]) {
+              delete state.collapsedGroups[targetGroupId];
+            }
+            // Recalculate displayOrder within new group
+            const tabsInNewGroup = state.tabs.filter(t => t.groupId === targetGroupId);
+            tabsInNewGroup.forEach((t, idx) => { t.displayOrder = idx; });
+            // Re-render and persist
+            renderTabBar();
+            try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+          }
+        }
       }
     };
 
@@ -3693,6 +3738,129 @@ function setupEventListeners() {
 
 let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: 29419 };
 
+// NEW: Render groups list in Settings > Tab Organization
+function renderGroupsList() {
+  const container = document.getElementById('groups-list-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  const groups = state.groups || [];
+
+  for (const group of groups) {
+    const row = document.createElement('div');
+    row.className = 'settings-group-row';
+
+    const swatch = document.createElement('div');
+    swatch.className = 'group-color-swatch';
+    swatch.style.background = group.color;
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'group-name-input';
+    nameInput.value = group.name;
+    nameInput.dataset.groupId = group.id;
+    nameInput.addEventListener('blur', () => {
+      const g = state.groups.find(x => x.id === group.id);
+      if (g && nameInput.value.trim()) {
+        g.name = nameInput.value.trim();
+        renderTabBar();
+        try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+      }
+    });
+
+    row.appendChild(swatch);
+    row.appendChild(nameInput);
+
+    // Only allow deleting non-auto-groups
+    if (!group.isAutoGroup) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-delete-group';
+      delBtn.textContent = 'Delete';
+      delBtn.dataset.groupId = group.id;
+      delBtn.addEventListener('click', () => deleteGroup(group.id));
+      row.appendChild(delBtn);
+    } else {
+      const badge = document.createElement('span');
+      badge.style.cssText = 'font-size:10px;color:var(--text-muted);margin-left:4px;';
+      badge.textContent = 'auto';
+      row.appendChild(badge);
+    }
+
+    container.appendChild(row);
+  }
+}
+
+// NEW: Show dialog to create custom group
+function showCreateGroupDialog() {
+  const existing = document.getElementById('create-group-dialog');
+  if (existing) { existing.remove(); }
+
+  const dlg = document.createElement('div');
+  dlg.id = 'create-group-dialog';
+  dlg.className = 'modal-overlay';
+  dlg.innerHTML = `
+    <div class="modal" style="max-width:360px;">
+      <h2 style="margin-bottom:16px;font-size:16px;">Create Custom Group</h2>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:6px;">Group Name</label>
+        <input type="text" id="new-group-name" placeholder="e.g. Production Servers"
+          style="width:100%;padding:8px;background:var(--bg-surface);border:1px solid var(--border-color);color:var(--text-primary);border-radius:4px;font-size:13px;">
+      </div>
+      <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+        <label style="font-size:13px;color:var(--text-secondary);">Color</label>
+        <input type="color" id="new-group-color" value="#89b4fa"
+          style="width:36px;height:36px;border:none;cursor:pointer;border-radius:4px;">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="btn-save-group" class="btn btn-primary">Create</button>
+        <button id="btn-cancel-group" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+
+  const nameInput = dlg.querySelector('#new-group-name');
+  nameInput.focus();
+
+  dlg.querySelector('#btn-save-group').addEventListener('click', () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.style.outline = '1px solid var(--accent-red)'; return; }
+    const color = dlg.querySelector('#new-group-color').value;
+    const newGroup = {
+      id: `group-${Date.now()}`,
+      name,
+      protocol: null,
+      isAutoGroup: false,
+      color,
+      isCollapsed: false,
+      displayOrder: state.groups.length,
+    };
+    state.groups.push(newGroup);
+    renderTabBar();
+    try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+    dlg.remove();
+    renderGroupsList();
+  });
+
+  dlg.querySelector('#btn-cancel-group').addEventListener('click', () => dlg.remove());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.remove(); });
+}
+
+// NEW: Delete a custom group (moves tabs to first remaining group)
+function deleteGroup(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  if (!group || group.isAutoGroup) return;  // Protect auto-groups
+
+  const remaining = state.groups.find(g => g.id !== groupId);
+  if (remaining) {
+    state.tabs.filter(t => t.groupId === groupId).forEach(t => { t.groupId = remaining.id; });
+  }
+
+  state.groups = state.groups.filter(g => g.id !== groupId);
+  renderTabBar();
+  try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+  renderGroupsList();
+}
+
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
@@ -3725,6 +3893,43 @@ async function openSettings() {
 
   // Default terminal status badge
   refreshDefaultTerminalStatus();
+
+  // NEW: Tab Organization section
+  renderGroupsList();
+  const autoGroupToggle = document.getElementById('settings-auto-group');
+  if (autoGroupToggle) {
+    autoGroupToggle.checked = state.settings.autoGroupByProtocol !== false;
+    // Remove previous listener to avoid stacking
+    autoGroupToggle.replaceWith(autoGroupToggle.cloneNode(true));
+    const freshToggle = document.getElementById('settings-auto-group');
+    if (freshToggle) {
+      freshToggle.checked = state.settings.autoGroupByProtocol !== false;
+      freshToggle.addEventListener('change', () => {
+        state.settings.autoGroupByProtocol = freshToggle.checked;
+        if (!freshToggle.checked) {
+          // Flatten to single group
+          if (!state.groups.find(g => g.id === 'group-other')) {
+            state.groups = [{ id: 'group-other', name: 'Tabs', protocol: null, isAutoGroup: false, color: '#6c7086', isCollapsed: false, displayOrder: 0 }];
+          }
+          state.tabs.forEach(t => { t.groupId = 'group-other'; });
+        } else {
+          // Re-apply auto-grouping
+          const protocols = new Set(state.tabs.map(t => t.protocol || 'local'));
+          state.groups = getDefaultGroupsForProtocols([...protocols]);
+          state.tabs.forEach(t => { t.groupId = deriveGroupId(t.protocol, t.connectionProfile); });
+        }
+        renderTabBar();
+        try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+        renderGroupsList();
+      });
+    }
+  }
+
+  const createGroupBtn = document.getElementById('btn-create-group');
+  if (createGroupBtn) {
+    createGroupBtn.replaceWith(createGroupBtn.cloneNode(true));
+    document.getElementById('btn-create-group').addEventListener('click', showCreateGroupDialog);
+  }
 }
 
 async function refreshDefaultTerminalStatus() {

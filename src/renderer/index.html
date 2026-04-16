@@ -741,6 +741,31 @@
 
             <div class="settings-divider"></div>
 
+            <!-- Tab Organization -->
+            <section class="settings-section">
+              <h3 class="settings-section-title">Tab Organization</h3>
+              <p class="settings-section-desc">
+                Group tabs by protocol type (Local, SSH, Serial) or create custom groups.
+                Drag tabs between groups in the tab bar to reassign them.
+              </p>
+              <div class="settings-row" style="margin-bottom: 12px;">
+                <label class="settings-toggle-label">
+                  <input type="checkbox" id="settings-auto-group" checked>
+                  <span>Auto-group new tabs by protocol</span>
+                </label>
+              </div>
+              <div class="settings-groups-list">
+                <div id="groups-list-container">
+                  <!-- Dynamically populated by openSettings() -->
+                </div>
+                <button id="btn-create-group" class="btn btn-secondary" style="margin-top:10px;">
+                  + Create Custom Group
+                </button>
+              </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
             <section class="settings-section">
               <h3 class="settings-section-title">Connection Storage</h3>
               <p class="settings-section-desc">

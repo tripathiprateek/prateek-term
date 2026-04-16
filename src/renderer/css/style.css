@@ -295,6 +295,13 @@ body {
   display: none;
 }
 
+/* Drop target highlight when dragging tab over a different group */
+.tab-group.drop-target {
+  background: rgba(137, 180, 250, 0.08);
+  border-radius: 4px;
+  outline: 1px dashed rgba(137, 180, 250, 0.4);
+}
+
 /* Divider between groups */
 .tab-group-divider {
   width: 1px;
@@ -1954,6 +1961,63 @@ body {
 
 .settings-default-term-status.not-default {
   color: var(--text-muted, #888);
+}
+
+/* Tab Organization — Group management */
+.settings-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.group-color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.group-name-input {
+  flex: 1;
+  padding: 5px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.group-name-input:focus {
+  outline: 1px solid var(--accent-blue);
+}
+
+.btn-delete-group {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--accent-red);
+  border: 1px solid var(--accent-red);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-delete-group:hover {
+  background: var(--accent-red);
+  color: white;
+}
+
+.settings-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
 /* Storage path row */
