@@ -733,7 +733,7 @@
 <!-- ╚══════════════════════════════╝ -->
 <div class="page-wrap">
   <div class="hero">
-    <div class="hero-badge">User Guide · v1.1</div>
+    <div class="hero-badge">User Guide · v1.1.2</div>
     <h1>Prateek-Term</h1>
     <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
   </div>
@@ -1757,7 +1757,7 @@
 
   <!-- ── Footer ── -->
   <div class="footer">
-    <p>Prateek-Term v1.1.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p>Prateek-Term v1.1.2 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
     <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
   </div>
 
@@ -1775,6 +1775,17 @@
     });
   }, { threshold: 0.15 });
   document.querySelectorAll('.section').forEach(s => observer.observe(s));
+
+  // Inject live version from URL param ?v=x.x.x passed by main process.
+  // Falls back to the hardcoded string already in the DOM.
+  (() => {
+    const v = new URLSearchParams(window.location.search).get('v');
+    if (!v) return;
+    const badge = document.querySelector('.hero-badge');
+    if (badge) badge.textContent = `User Guide · v${v}`;
+    const footer = document.querySelector('.footer p');
+    if (footer) footer.textContent = `Prateek-Term v${v} · Built for macOS · © 2026 Prateek Tripathi`;
+  })();
 </script>
 </body>
 </html>

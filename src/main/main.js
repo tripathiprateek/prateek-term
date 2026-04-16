@@ -1131,7 +1131,7 @@ function openUserGuide() {
   const guidePath = app.isPackaged
     ? path.join(process.resourcesPath, 'docs', 'user-guide.html')
     : path.join(__dirname, '../../docs/user-guide.html');
-  userGuideWindow.loadFile(guidePath);
+  userGuideWindow.loadFile(guidePath, { query: { v: app.getVersion() } });
   userGuideWindow.on('closed', () => { userGuideWindow = null; });
 }
 
@@ -1154,7 +1154,11 @@ ipcMain.handle('help:open', () => {
       nodeIntegration: false,
     },
   });
-  helpWindow.loadFile(path.join(__dirname, '..', 'renderer', 'help.html'));
+  // Use the canonical user-guide.html — single source of truth for all docs.
+  const guidePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'docs', 'user-guide.html')
+    : path.join(__dirname, '../../docs/user-guide.html');
+  helpWindow.loadFile(guidePath, { query: { v: app.getVersion() } });
   helpWindow.on('closed', () => { helpWindow = null; });
 });
 
