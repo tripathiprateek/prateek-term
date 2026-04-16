@@ -465,16 +465,26 @@ function getProtocolColor(protocol) {
   return colorMap[protocol] || '#6c7086';
 }
 
+// Returns { id, name, color } for a tag-based group
+function getTagGroupInfo(tag) {
+  const tagName = tag.name || tag;
+  const tagColor = tag.color || '#6c7086';
+  const tagId = 'group-tag-' + tagName.toLowerCase().replace(/\s+/g, '-');
+  return { id: tagId, name: tagName, color: tagColor };
+}
+
+// Tag-first grouping: use first tag if available, else fall back to protocol
 function deriveGroupId(protocol, connectionProfile) {
+  const tags = connectionProfile?.tags;
+  if (tags && tags.length > 0) {
+    return getTagGroupInfo(tags[0]).id;
+  }
   if (protocol === 'local') return 'group-local';
   if (protocol === 'serial') return 'group-serial';
-  // SSH might have special modes (SCP, SFTP, etc.)
-  if (connectionProfile?.sshMode) {
-    return `group-${connectionProfile.sshMode}`;
-  }
   return `group-${protocol}`;
 }
 
+// Used for session migration only (connectionProfiles not yet loaded)
 function getDefaultGroupsForProtocols(protocols) {
   const groups = [];
   const PROTOCOL_ORDER = ['local', 'ssh', 'serial', 'telnet', 'ftp'];
@@ -493,6 +503,33 @@ function getDefaultGroupsForProtocols(protocols) {
     });
   }
   return groups;
+}
+
+// Build groups from actual tabs (tag-aware, for re-grouping at runtime)
+function buildGroupsFromTabs(tabs) {
+  const seen = new Map(); // groupId → group object
+  tabs.forEach(tab => {
+    const gid = tab.groupId || deriveGroupId(tab.protocol || 'local', tab.connectionProfile);
+    if (!seen.has(gid)) {
+      const tags = tab.connectionProfile?.tags;
+      if (tags && tags.length > 0) {
+        const info = getTagGroupInfo(tags[0]);
+        seen.set(gid, {
+          id: info.id, name: info.name, protocol: null,
+          isAutoGroup: true, color: info.color,
+          isCollapsed: false, displayOrder: seen.size,
+        });
+      } else {
+        const proto = tab.protocol || 'local';
+        seen.set(gid, {
+          id: gid, name: proto.charAt(0).toUpperCase() + proto.slice(1),
+          protocol: proto, isAutoGroup: true, color: getProtocolColor(proto),
+          isCollapsed: false, displayOrder: seen.size,
+        });
+      }
+    }
+  });
+  return [...seen.values()];
 }
 
 let tabIdCounter = 0;
@@ -1204,18 +1241,36 @@ function removeOverlay(pane, className) {
 
 // NEW: Ensure groups are initialized (called before renderTabBar)
 function ensureGroupsInitialized() {
-  if (state.groups && state.groups.length > 0) return;
+  if (!state.groups) state.groups = [];
 
-  // Auto-generate groups based on current tab protocols
-  const protocols = new Set(state.tabs.map(t => t.protocol || 'local'));
-  if (protocols.size === 0) return;  // No tabs yet
-
-  state.groups = getDefaultGroupsForProtocols([...protocols]);
-
-  // Assign tabs to their groups if not already assigned
+  // Collect all groupIds that tabs need
   state.tabs.forEach(tab => {
     if (!tab.groupId) {
       tab.groupId = deriveGroupId(tab.protocol, tab.connectionProfile);
+    }
+    // Add group if tab's groupId has no corresponding group
+    const groupExists = state.groups.some(g => g.id === tab.groupId);
+    if (!groupExists) {
+      const tags = tab.connectionProfile?.tags;
+      if (tags && tags.length > 0) {
+        const info = getTagGroupInfo(tags[0]);
+        state.groups.push({
+          id: info.id, name: info.name, protocol: null,
+          isAutoGroup: true, color: info.color,
+          isCollapsed: false, displayOrder: state.groups.length,
+        });
+      } else {
+        const proto = tab.protocol || 'local';
+        state.groups.push({
+          id: tab.groupId,
+          name: proto.charAt(0).toUpperCase() + proto.slice(1),
+          protocol: proto,
+          isAutoGroup: true,
+          color: getProtocolColor(proto),
+          isCollapsed: false,
+          displayOrder: state.groups.length,
+        });
+      }
     }
   });
 }
@@ -1233,8 +1288,10 @@ function renderTabBar() {
     return;
   }
 
-  // Sort groups by displayOrder
-  const sortedGroups = [...state.groups].sort((a, b) => a.displayOrder - b.displayOrder);
+  // Sort groups by displayOrder, skip empty ones
+  const sortedGroups = [...state.groups]
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .filter(g => state.tabs.some(t => t.groupId === g.id));
 
   for (let i = 0; i < sortedGroups.length; i++) {
     const group = sortedGroups[i];
@@ -1247,10 +1304,17 @@ function renderTabBar() {
       groupEl.classList.add('collapsed');
     }
 
-    // Group separator (thin colored line on left)
+    // Group label chip (colored, shows group name)
     const separator = document.createElement('div');
     separator.className = 'tab-group-separator';
     separator.style.borderLeftColor = group.color;
+    separator.style.color = group.color;
+    const labelEl = document.createElement('span');
+    labelEl.className = 'tab-group-label';
+    labelEl.textContent = group.name.toUpperCase();
+    separator.appendChild(labelEl);
+    separator.title = group.name;
+    separator.addEventListener('click', () => toggleGroupCollapsed(group.id));
     groupEl.appendChild(separator);
 
     // Render tabs in this group
@@ -1391,25 +1455,51 @@ function renderTab(tab, parentEl = null) {
         // Detach without killing the PTY — the new window will adopt it
         detachTab(tab.id);
       } else if (dragging) {
-        // NEW: Handle group reassignment on drop
-        const targetGroupEl = document.elementFromPoint(ev.clientX, ev.clientY)
-          ?.closest('.tab-group');
+        // Handle tab reorder / group reassignment on drop
+        const dropEl = document.elementFromPoint(ev.clientX, ev.clientY);
+        const targetTabEl  = dropEl?.closest('.tab');
+        const targetGroupEl = dropEl?.closest('.tab-group');
+
         if (targetGroupEl) {
           const targetGroupId = targetGroupEl.dataset.groupId;
-          if (targetGroupId && targetGroupId !== tab.groupId) {
-            // Move tab to new group
-            tab.groupId = targetGroupId;
-            // Auto-expand target group if collapsed
-            if (state.collapsedGroups[targetGroupId]) {
-              delete state.collapsedGroups[targetGroupId];
-            }
-            // Recalculate displayOrder within new group
-            const tabsInNewGroup = state.tabs.filter(t => t.groupId === targetGroupId);
-            tabsInNewGroup.forEach((t, idx) => { t.displayOrder = idx; });
-            // Re-render and persist
-            renderTabBar();
-            try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
+          if (!targetGroupId) return;
+
+          // Auto-expand target group if collapsed
+          if (state.collapsedGroups[targetGroupId]) {
+            delete state.collapsedGroups[targetGroupId];
           }
+
+          // Move tab to target group (cross-group or same-group)
+          tab.groupId = targetGroupId;
+
+          if (targetTabEl) {
+            const targetTabId = parseInt(targetTabEl.dataset.tabId);
+            const targetTab   = state.tabs.find(t => t.id === targetTabId);
+
+            if (targetTab && targetTab.id !== tab.id) {
+              // Insert before or after target tab based on drop x position
+              const rect = targetTabEl.getBoundingClientRect();
+              const insertBefore = ev.clientX < rect.left + rect.width / 2;
+
+              // Rebuild displayOrder for the target group (excluding the dragged tab)
+              const siblings = state.tabs
+                .filter(t => t.groupId === targetGroupId && t.id !== tab.id)
+                .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+
+              const targetIdx = siblings.findIndex(t => t.id === targetTabId);
+              const insertIdx = insertBefore ? targetIdx : targetIdx + 1;
+              siblings.splice(Math.max(0, insertIdx), 0, tab);
+              siblings.forEach((t, idx) => { t.displayOrder = idx; });
+            }
+          } else {
+            // Dropped on empty group space → append to end
+            const tabsInGroup = state.tabs
+              .filter(t => t.groupId === targetGroupId && t.id !== tab.id);
+            tab.displayOrder = tabsInGroup.length;
+          }
+
+          renderTabBar();
+          try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }
         }
       }
     };
@@ -3913,10 +4003,9 @@ async function openSettings() {
           }
           state.tabs.forEach(t => { t.groupId = 'group-other'; });
         } else {
-          // Re-apply auto-grouping
-          const protocols = new Set(state.tabs.map(t => t.protocol || 'local'));
-          state.groups = getDefaultGroupsForProtocols([...protocols]);
+          // Re-apply auto-grouping (tag-aware)
           state.tabs.forEach(t => { t.groupId = deriveGroupId(t.protocol, t.connectionProfile); });
+          state.groups = buildGroupsFromTabs(state.tabs);
         }
         renderTabBar();
         try { window.terminalAPI.saveSessionSync(buildSessionData()); } catch { /* non-critical */ }

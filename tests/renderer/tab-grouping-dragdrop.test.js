@@ -13,11 +13,8 @@ describe('Tab Grouping — Drag-Drop (source contracts)', () => {
       expect(source).toContain("?.closest('.tab-group')");
     });
 
-    it('checks targetGroupId !== tab.groupId before reassigning', () => {
-      expect(source).toContain("targetGroupId !== tab.groupId");
-    });
-
-    it('updates tab.groupId on drop into new group', () => {
+    it('updates tab.groupId on drop into target group', () => {
+      // tab.groupId = targetGroupId handles both cross-group and same-group
       expect(source).toContain("tab.groupId = targetGroupId");
     });
 

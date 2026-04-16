@@ -26,13 +26,47 @@ function getProtocolColor(protocol) {
   return colorMap[protocol] || '#6c7086';
 }
 
+function getTagGroupInfo(tag) {
+  const tagName = tag.name || tag;
+  const tagColor = tag.color || '#6c7086';
+  const tagId = 'group-tag-' + tagName.toLowerCase().replace(/\s+/g, '-');
+  return { id: tagId, name: tagName, color: tagColor };
+}
+
 function deriveGroupId(protocol, connectionProfile) {
+  const tags = connectionProfile?.tags;
+  if (tags && tags.length > 0) {
+    return getTagGroupInfo(tags[0]).id;
+  }
   if (protocol === 'local') return 'group-local';
   if (protocol === 'serial') return 'group-serial';
-  if (connectionProfile?.sshMode) {
-    return `group-${connectionProfile.sshMode}`;
-  }
   return `group-${protocol}`;
+}
+
+function buildGroupsFromTabs(tabs) {
+  const seen = new Map();
+  tabs.forEach(tab => {
+    const gid = tab.groupId || deriveGroupId(tab.protocol || 'local', tab.connectionProfile);
+    if (!seen.has(gid)) {
+      const tags = tab.connectionProfile?.tags;
+      if (tags && tags.length > 0) {
+        const info = getTagGroupInfo(tags[0]);
+        seen.set(gid, {
+          id: info.id, name: info.name, protocol: null,
+          isAutoGroup: true, color: info.color,
+          isCollapsed: false, displayOrder: seen.size,
+        });
+      } else {
+        const proto = tab.protocol || 'local';
+        seen.set(gid, {
+          id: gid, name: proto.charAt(0).toUpperCase() + proto.slice(1),
+          protocol: proto, isAutoGroup: true, color: getProtocolColor(proto),
+          isCollapsed: false, displayOrder: seen.size,
+        });
+      }
+    }
+  });
+  return [...seen.values()];
 }
 
 function getDefaultGroupsForProtocols(protocols) {
@@ -56,24 +90,66 @@ function getDefaultGroupsForProtocols(protocols) {
 }
 
 describe('Tab Grouping — Helpers', () => {
+  describe('getTagGroupInfo()', () => {
+    it('returns correct id for tag with spaces', () => {
+      const info = getTagGroupInfo({ name: 'AWS Production', color: '#f38ba8' });
+      expect(info.id).toBe('group-tag-aws-production');
+    });
+
+    it('returns tag name as group name', () => {
+      const info = getTagGroupInfo({ name: 'HOME', color: '#a6e3a1' });
+      expect(info.name).toBe('HOME');
+    });
+
+    it('returns tag color as group color', () => {
+      const info = getTagGroupInfo({ name: 'AWS', color: '#89b4fa' });
+      expect(info.color).toBe('#89b4fa');
+    });
+
+    it('handles string tags (name fallback)', () => {
+      const info = getTagGroupInfo('home');
+      expect(info.id).toBe('group-tag-home');
+      expect(info.name).toBe('home');
+    });
+
+    it('uses default color when tag has no color', () => {
+      const info = getTagGroupInfo({ name: 'staging' });
+      expect(info.color).toBe('#6c7086');
+    });
+  });
+
   describe('deriveGroupId()', () => {
-    it('returns group-local for local protocol', () => {
+    it('returns group-local for local protocol (no tags)', () => {
       expect(deriveGroupId('local', null)).toBe('group-local');
     });
 
-    it('returns group-serial for serial protocol', () => {
+    it('returns group-serial for serial protocol (no tags)', () => {
       expect(deriveGroupId('serial', null)).toBe('group-serial');
     });
 
-    it('returns group-{protocol} for generic protocol', () => {
+    it('returns group-{protocol} for generic protocol (no tags)', () => {
       expect(deriveGroupId('ssh', null)).toBe('group-ssh');
       expect(deriveGroupId('ftp', null)).toBe('group-ftp');
       expect(deriveGroupId('telnet', null)).toBe('group-telnet');
     });
 
-    it('returns group-{sshMode} when sshMode is set', () => {
-      const profile = { sshMode: 'sftp' };
-      expect(deriveGroupId('ssh', profile)).toBe('group-sftp');
+    it('uses first tag when connectionProfile has tags', () => {
+      const profile = { tags: [{ name: 'AWS', color: '#89b4fa' }, { name: 'prod', color: '#f38ba8' }] };
+      expect(deriveGroupId('ssh', profile)).toBe('group-tag-aws');
+    });
+
+    it('uses tag even for local protocol when tags present', () => {
+      const profile = { tags: [{ name: 'HOME', color: '#a6e3a1' }] };
+      expect(deriveGroupId('local', profile)).toBe('group-tag-home');
+    });
+
+    it('falls back to protocol when tags array is empty', () => {
+      const profile = { tags: [] };
+      expect(deriveGroupId('ssh', profile)).toBe('group-ssh');
+    });
+
+    it('falls back to protocol when connectionProfile is null', () => {
+      expect(deriveGroupId('ssh', null)).toBe('group-ssh');
     });
   });
 
@@ -141,6 +217,71 @@ describe('Tab Grouping — Helpers', () => {
   });
 });
 
+describe('Tab Grouping — buildGroupsFromTabs()', () => {
+  it('creates tag-based group for tab with tags', () => {
+    const tabs = [
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].id).toBe('group-tag-aws');
+    expect(groups[0].name).toBe('AWS');
+    expect(groups[0].color).toBe('#89b4fa');
+  });
+
+  it('creates protocol-based group for tab without tags', () => {
+    const tabs = [
+      { protocol: 'ssh', connectionProfile: null },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].id).toBe('group-ssh');
+    expect(groups[0].protocol).toBe('ssh');
+  });
+
+  it('groups tabs by first tag — two different tags = two groups', () => {
+    const tabs = [
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'HOME', color: '#a6e3a1' }] } },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups).toHaveLength(2);
+    expect(groups.map(g => g.id)).toEqual(['group-tag-aws', 'group-tag-home']);
+  });
+
+  it('deduplicates tabs sharing the same tag', () => {
+    const tabs = [
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].id).toBe('group-tag-aws');
+  });
+
+  it('mixes tag and protocol groups', () => {
+    const tabs = [
+      { protocol: 'local', connectionProfile: null },
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups).toHaveLength(2);
+    const ids = groups.map(g => g.id);
+    expect(ids).toContain('group-local');
+    expect(ids).toContain('group-tag-aws');
+  });
+
+  it('assigns incremental displayOrder', () => {
+    const tabs = [
+      { protocol: 'local', connectionProfile: null },
+      { protocol: 'ssh', connectionProfile: { tags: [{ name: 'AWS', color: '#89b4fa' }] } },
+    ];
+    const groups = buildGroupsFromTabs(tabs);
+    expect(groups[0].displayOrder).toBe(0);
+    expect(groups[1].displayOrder).toBe(1);
+  });
+});
+
 describe('Tab Grouping — Session Migration', () => {
   describe('Session backfill logic', () => {
     it('detects missing groups array in old session', () => {
@@ -167,7 +308,7 @@ describe('Tab Grouping — Session Migration', () => {
       expect([...protocols]).toHaveLength(2);
     });
 
-    it('backsills groupId on tabs without it', () => {
+    it('backfills groupId on tabs without it (no connectionProfile → protocol fallback)', () => {
       const tab = { protocol: 'ssh', name: 'server' };
       const groupId = deriveGroupId(tab.protocol, null);
       expect(groupId).toBe('group-ssh');

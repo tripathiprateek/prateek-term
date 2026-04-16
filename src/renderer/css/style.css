@@ -275,14 +275,31 @@ body {
   gap: 0;
 }
 
-/* Group separator (thin colored line on left) */
+/* Group label chip */
 .tab-group-separator {
-  width: 3px;
-  height: 24px;
-  border-left: 2px solid currentColor;  /* Inherits group color */
-  margin: 0 4px 0 0;
-  opacity: 0.4;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  height: 20px;
+  border-left: 2px solid currentColor;
+  margin: 0 4px 0 2px;
   flex-shrink: 0;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+.tab-group-separator:hover {
+  opacity: 1;
+}
+
+.tab-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: currentColor;
+  white-space: nowrap;
 }
 
 /* Collapsed group: hide tabs, show only separator */
