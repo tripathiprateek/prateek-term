@@ -996,6 +996,7 @@ async function createTab(options = {}) {
   // Right-click: always show context menu
   pane.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    e.stopPropagation();
     showTerminalContextMenu(e.clientX, e.clientY, term, tab);
   });
 
@@ -2320,6 +2321,7 @@ function renderSidebarTagFilters() {
 
     chip.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       showTagContextMenu(e, tag, chip);
     });
 
@@ -2474,6 +2476,7 @@ function renderSidebarHosts() {
 
       host.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         showHostContextMenu(e, profile);
       });
 
