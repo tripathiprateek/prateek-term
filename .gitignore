@@ -9,6 +9,9 @@ out/
 # Claude Code local config
 .claude/
 
+# Graphify knowledge graph outputs
+graphify-out/
+
 # Local-only docs
 docs/marketing/
 docs/linux-port-diagram.html
