@@ -2120,8 +2120,9 @@ async function reconnectTab(tab) {
     } else {
       let shellCommand = null, shellArgs = [], extraEnv = {}, cleanupFiles = [];
       if (tab.connectionProfile) {
-        // Ensure pasted PEM keys have a temp file path (lost on session restore)
-        if (tab.connectionProfile.pemText && !tab.connectionProfile.pemFile) {
+        // Always re-write pasted PEM key before reconnect — file may have been
+        // deleted by MCP bridge cleanup (both use the same hash-based path).
+        if (tab.connectionProfile.pemText) {
           tab.connectionProfile.pemFile = await window.terminalAPI.saveTempKey(tab.connectionProfile.pemText);
         }
         const commandInfo = await window.terminalAPI.connect(tab.connectionProfile);

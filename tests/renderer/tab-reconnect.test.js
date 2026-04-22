@@ -84,6 +84,30 @@ describe('reconnectTab function', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Pasted PEM key — reconnect after MCP bridge cleanup (BUG-013-ext)
+// ---------------------------------------------------------------------------
+
+describe('pasted PEM key on reconnect', () => {
+  test('always re-writes temp key on reconnect when pemText present (not just when pemFile missing)', () => {
+    // The MCP bridge cleanup deletes the same hash-based temp key path.
+    // Fix: drop the !pemFile guard so saveTempKey is called unconditionally.
+    const reconnectFn = source.match(/async function reconnectTab[\s\S]{0,3000}/)?.[0] || '';
+    // Must NOT have the old guard: pemText && !pemFile
+    expect(reconnectFn).not.toMatch(/pemText\s*&&\s*!tab\.connectionProfile\.pemFile/);
+  });
+
+  test('reconnectTab calls saveTempKey whenever pemText is set', () => {
+    const reconnectFn = source.match(/async function reconnectTab[\s\S]{0,3000}/)?.[0] || '';
+    // Should have: if (tab.connectionProfile.pemText)  { ...saveTempKey... }
+    expect(reconnectFn).toMatch(/tab\.connectionProfile\.pemText[\s\S]{0,300}saveTempKey/);
+  });
+
+  test('comment explains MCP bridge cleanup as reason for unconditional re-write', () => {
+    expect(source).toMatch(/MCP bridge cleanup|bridge.*cleanup|deleted.*bridge|bridge.*deleted/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // showExitMessage — reconnect prompt logic
 // ---------------------------------------------------------------------------
 
