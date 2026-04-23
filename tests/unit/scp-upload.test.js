@@ -68,3 +68,32 @@ describe('SCP upload — multi-window progress routing (BUG-006)', () => {
     expect(source).toMatch(/senderContents\.isDestroyed\(\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Drag-drop SCP uses buildCommonSSHFlags (password auth on embedded devices)
+// ---------------------------------------------------------------------------
+
+describe('SCP upload — uses buildCommonSSHFlags for auth (password devices)', () => {
+  test('flags built from buildCommonSSHFlags not manual inline flags', () => {
+    // Must call buildCommonSSHFlags(profile) — not manually set auth flags
+    expect(source).toMatch(/buildCommonSSHFlags\(profile\)/);
+  });
+
+  test('always includes -O for legacy SCP protocol', () => {
+    // -O forces legacy SCP — embedded devices (NTC-502, dropbear) lack SFTP subsystem
+    const scpUploadBlock = source.match(/ipcMain\.handle\('scp:upload'[\s\S]{0,1500}/)?.[0] || '';
+    expect(scpUploadBlock).toContain("'-O'");
+  });
+
+  test('does NOT manually duplicate strictHostOff flags (now in buildCommonSSHFlags)', () => {
+    // Old code manually pushed StrictHostKeyChecking — now handled by buildCommonSSHFlags
+    const scpUploadBlock = source.match(/ipcMain\.handle\('scp:upload'[\s\S]{0,1500}/)?.[0] || '';
+    // Should not have a manual if (profile.strictHostOff) block inside scp:upload
+    expect(scpUploadBlock).not.toMatch(/if\s*\(profile\.strictHostOff\)\s*\{[\s\S]{0,100}StrictHostKeyChecking=no/);
+  });
+
+  test('does NOT manually duplicate pemFile -i flag (now in buildCommonSSHFlags)', () => {
+    const scpUploadBlock = source.match(/ipcMain\.handle\('scp:upload'[\s\S]{0,1500}/)?.[0] || '';
+    expect(scpUploadBlock).not.toMatch(/if\s*\(profile\.pemFile\)\s*\{\s*flags\.push\('-i'/);
+  });
+});

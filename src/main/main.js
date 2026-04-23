@@ -1264,24 +1264,16 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   const transferId = ++scpTransferId;
   const senderContents = event.sender; // send events back to originating window
 
-  const flags = ['-O']; // Force legacy SCP protocol — many embedded devices lack SFTP subsystem
+  // Use buildCommonSSHFlags so drag-drop SCP gets the same auth flags as the
+  // SSH terminal: PreferredAuthentications, HostKeyAlgorithms, ConnectTimeout,
+  // pemFile -i / IdentitiesOnly, strictHostOff, compression, etc.
+  const flags = ['-O', ...buildCommonSSHFlags(profile)]; // -O = force legacy SCP protocol
 
   // Recursive flag for directories
   let isDirectory = false;
   try { isDirectory = fs.statSync(filePath).isDirectory(); } catch { /* let scp report the error */ }
   if (isDirectory) flags.push('-r');
   dbgLog(`[scp:${transferId}] upload "${fileName}" → ${profile.username||''}@${profile.host}:${remotePath||'~/'} isDir=${isDirectory} pemFile=${!!profile.pemFile}`);
-
-  if (profile.pemFile) {
-    flags.push('-i', profile.pemFile);
-  }
-
-  if (profile.strictHostOff) {
-    flags.push('-o', 'StrictHostKeyChecking=no');
-    flags.push('-o', 'UserKnownHostsFile=/dev/null');
-  }
-
-  if (profile.compression) flags.push('-C');
 
   if (profile.port && profile.port !== 22) {
     flags.push('-P', String(profile.port));
