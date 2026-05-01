@@ -1075,10 +1075,17 @@ async function createTab(options = {}) {
       }
     });
 
+    // Expose checkCwd so scheduleCwdRestore can trigger a post-cd name refresh.
+    tab._checkCwd = checkCwd;
+
     // Proactive first probe: populate `_cwdPath` shortly after spawn so a quit
     // before the user ever presses Enter still persists a real path. Without
     // this, freshly-restored tabs saved `cwd: null` → next launch lands in $HOME.
-    setTimeout(checkCwd, 600);
+    //
+    // The handle is stored on the tab so scheduleCwdRestore can cancel it —
+    // if a CWD restore is pending the probe would fire BEFORE the `cd` completes
+    // and overwrite the tab name with the home-dir name (wrong).
+    tab._cwdProbeTimer = setTimeout(checkCwd, 600);
   }
 
   // Auto-copy on selection (PuTTY / Linux terminal style)
@@ -1938,6 +1945,11 @@ function scheduleCwdRestore(tab, savedCwd, protocol) {
   if (!String(savedCwd).startsWith('/')) return;
   if (protocol === 'local') {
     tab._cwdPath = savedCwd;
+
+    // Cancel the 600ms proactive CWD probe. It fires BEFORE the `cd` command
+    // completes and reads the home dir → overwrites the saved tab name with the
+    // wrong directory. We replace it with a single post-cd check below.
+    clearTimeout(tab._cwdProbeTimer);
   } else {
     tab._remoteCwd = savedCwd;
   }
@@ -1945,6 +1957,12 @@ function scheduleCwdRestore(tab, savedCwd, protocol) {
   setTimeout(() => {
     if (!tab.ptyId) return;
     window.terminalAPI.sendInput(tab.ptyId, ` cd ${shellQuote(savedCwd)}\r`);
+
+    // After the cd, fire one CWD check to update the tab name to the restored
+    // directory. 1000ms gives the shell time to process the cd command.
+    if (protocol === 'local' && tab._checkCwd) {
+      setTimeout(tab._checkCwd, 1000);
+    }
   }, delay);
 }
 

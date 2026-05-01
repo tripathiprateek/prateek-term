@@ -111,3 +111,23 @@ describe('app.js — proactive first cwd probe on spawn', () => {
     expect(appSource).toMatch(/setTimeout\(checkCwd,\s*600\)/);
   });
 });
+
+describe('app.js — tab name preservation during session restore (race fix)', () => {
+  test('scheduleCwdRestore cancels the 600ms probe timer to prevent wrong-name overwrite', () => {
+    expect(appSource).toMatch(/clearTimeout\(tab\._cwdProbeTimer\)/);
+  });
+
+  test('proactive probe timer handle is stored on tab._cwdProbeTimer', () => {
+    expect(appSource).toMatch(/tab\._cwdProbeTimer\s*=\s*setTimeout\(checkCwd,\s*600\)/);
+  });
+
+  test('tab._checkCwd is exposed so scheduleCwdRestore can trigger a post-cd name refresh', () => {
+    expect(appSource).toMatch(/tab\._checkCwd\s*=\s*checkCwd/);
+  });
+
+  test('scheduleCwdRestore schedules post-cd name check for local protocol', () => {
+    // After the cd command is sent, a follow-up checkCwd fires 1000ms later
+    expect(appSource).toMatch(/tab\._checkCwd\s*\)/);
+    expect(appSource).toMatch(/setTimeout\(tab\._checkCwd,\s*1000\)/);
+  });
+});
