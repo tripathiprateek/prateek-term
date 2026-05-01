@@ -1479,6 +1479,12 @@ function renderTab(tab, parentEl = null) {
 
   tabEl.addEventListener('click', () => activateTab(tab.id));
 
+  tabEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTabContextMenu(e.clientX, e.clientY, tab);
+  });
+
   // Drag tab downward to tear it off into a new window
   tabEl.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
@@ -2157,6 +2163,87 @@ function disableSerialFilter(tab) {
     tab.fitAddon.fit();
     tab.term.focus();
   });
+}
+
+// ===== Tab Context Menu =====
+
+function showTabContextMenu(x, y, targetTab) {
+  document.querySelector('.tab-context-menu')?.remove();
+
+  // Ordered list of all visible tabs (preserves display order)
+  const allTabs  = state.tabs;
+  const idx      = allTabs.findIndex(t => t.id === targetTab.id);
+  const hasLeft  = idx > 0;
+  const hasRight = idx < allTabs.length - 1;
+  const hasOthers = allTabs.length > 1;
+
+  const menu = document.createElement('div');
+  menu.className = 'tab-context-menu';
+  menu.innerHTML = `
+    <button class="tcm-close-tab">
+      Close Tab
+    </button>
+    <div class="tcm-divider"></div>
+    <button class="tcm-close-left"  ${hasLeft   ? '' : 'disabled'}>Close Tabs to the Left</button>
+    <button class="tcm-close-right" ${hasRight  ? '' : 'disabled'}>Close Tabs to the Right</button>
+    <div class="tcm-divider"></div>
+    <button class="tcm-close-others" ${hasOthers ? '' : 'disabled'}>Close Other Tabs</button>
+    <button class="tcm-close-all">Close All Tabs</button>
+  `;
+
+  // Position — keep menu inside viewport
+  document.body.appendChild(menu);
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const vw = window.innerWidth,  vh = window.innerHeight;
+  menu.style.left = `${Math.min(x, vw - mw - 8)}px`;
+  menu.style.top  = `${Math.min(y, vh - mh - 8)}px`;
+
+  const dismiss = () => menu.remove();
+
+  menu.querySelector('.tcm-close-tab').addEventListener('click', () => {
+    dismiss();
+    closeTab(targetTab.id);
+  });
+
+  menu.querySelector('.tcm-close-left').addEventListener('click', () => {
+    dismiss();
+    if (!hasLeft) return;
+    // Close all tabs with a lower index — iterate copy to avoid mutation issues
+    allTabs.slice(0, idx).forEach(t => closeTab(t.id));
+  });
+
+  menu.querySelector('.tcm-close-right').addEventListener('click', () => {
+    dismiss();
+    if (!hasRight) return;
+    allTabs.slice(idx + 1).forEach(t => closeTab(t.id));
+  });
+
+  menu.querySelector('.tcm-close-others').addEventListener('click', () => {
+    dismiss();
+    allTabs.filter(t => t.id !== targetTab.id).forEach(t => closeTab(t.id));
+  });
+
+  menu.querySelector('.tcm-close-all').addEventListener('click', () => {
+    dismiss();
+    [...allTabs].forEach(t => closeTab(t.id));
+  });
+
+  // Dismiss on outside click or Escape
+  const onOutside = (e) => {
+    if (!menu.contains(e.target)) { dismiss(); cleanup(); }
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { dismiss(); cleanup(); }
+  };
+  const cleanup = () => {
+    document.removeEventListener('mousedown', onOutside);
+    document.removeEventListener('keydown',   onKey);
+  };
+  // Defer so the triggering mousedown doesn't immediately dismiss
+  setTimeout(() => {
+    document.addEventListener('mousedown', onOutside);
+    document.addEventListener('keydown',   onKey);
+  }, 0);
 }
 
 // ===== Terminal Context Menu =====

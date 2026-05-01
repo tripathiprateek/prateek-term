@@ -2375,6 +2375,59 @@ code {
 }
 
 /* ===== Terminal Context Menu ===== */
+/* ===== Tab Context Menu ===== */
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+}
+
+.tab-context-menu button {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  text-align: left;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab-context-menu button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.tab-context-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.tab-context-menu button.tcm-close-all,
+.tab-context-menu button.tcm-close-others {
+  color: var(--accent-red, #f38ba8);
+}
+
+.tab-context-menu button.tcm-close-all:hover:not(:disabled),
+.tab-context-menu button.tcm-close-others:hover:not(:disabled) {
+  background: rgba(243, 139, 168, 0.12);
+}
+
+.tcm-divider {
+  height: 1px;
+  background: var(--border-subtle, var(--border-color));
+  margin: 3px 4px;
+  opacity: 0.5;
+}
+
 .terminal-context-menu {
   position: fixed;
   z-index: 9999;
