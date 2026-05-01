@@ -64,7 +64,7 @@ describe('restoreSession — calls activateTab (not switchTab)', () => {
 describe('restoreSession — try-catch around each tab restore', () => {
   test('restoreSession wraps tab restoration in try-catch', () => {
     // The for-loop over session.tabs must have a try-catch inside it
-    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,2000}/);
+    const restoreBlock = source.match(/async function restoreSession\(\)[\s\S]{0,4000}/);
     expect(restoreBlock).not.toBeNull();
     // Should contain both try { and } catch (e) {
     expect(restoreBlock[0]).toMatch(/try\s*\{/);

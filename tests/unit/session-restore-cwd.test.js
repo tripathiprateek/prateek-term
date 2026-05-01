@@ -91,10 +91,13 @@ describe('app.js — restoreSession injects cd to saved path', () => {
     expect(appSource).toMatch(/tab\._remoteCwd\s*=\s*savedCwd/);
   });
 
-  test('restoreSession calls scheduleCwdRestore for both local and ssh branches', () => {
-    const localCalls = appSource.match(/scheduleCwdRestore\(tab,\s*saved\.cwd,\s*'local'\)/g) || [];
-    const sshCalls   = appSource.match(/scheduleCwdRestore\(tab,\s*saved\.cwd,\s*saved\.protocol\)/g) || [];
-    expect(localCalls.length).toBe(1);
+  test('restoreSession spawns local PTY directly in saved cwd (no cd command needed)', () => {
+    // Local tabs: cwd is passed to createTab so the shell starts there from birth.
+    expect(appSource).toMatch(/createTab\(\{[^}]*cwd:\s*saved\.cwd/);
+  });
+
+  test('restoreSession still calls scheduleCwdRestore for SSH branch', () => {
+    const sshCalls = appSource.match(/scheduleCwdRestore\(tab,\s*saved\.cwd,\s*saved\.protocol\)/g) || [];
     expect(sshCalls.length).toBe(1);
   });
 

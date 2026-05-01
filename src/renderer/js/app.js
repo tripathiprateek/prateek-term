@@ -2009,11 +2009,23 @@ async function restoreSession() {
         : null;
 
       if (saved.protocol === 'local') {
-        // Local terminal: open shell in saved cwd, show history
-        await createTab({ protocol: 'local', name: saved.name || 'Terminal' });
+        // Local terminal: spawn the shell directly in the saved cwd so it starts
+        // there from birth — no `cd` command needed, no timing race.
+        await createTab({ protocol: 'local', name: saved.name || 'Terminal', cwd: saved.cwd || null });
         const tab = state.tabs[state.tabs.length - 1];
+        // Pre-seed the tracked paths so the first CWD probe / drag-drop reflect the real dir.
+        if (saved.cwd) {
+          tab._cwdPath = saved.cwd;
+          const dirName = saved.cwd.split('/').filter(Boolean).pop() || '/';
+          tab._lastCwd = dirName;
+          tab.name = dirName;
+          const tabEl = document.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+          if (tabEl) {
+            const titleEl = tabEl.querySelector('.tab-title');
+            if (titleEl) titleEl.textContent = dirName;
+          }
+        }
         writeScrollbackHistory(tab, saved.scrollback);
-        scheduleCwdRestore(tab, saved.cwd, 'local');
         lastTabId = tab.id;
 
       } else if (profile) {
