@@ -27,6 +27,7 @@ const bridge = require('./http-bridge');
 const {
   isSshpassAvailable,
   wrapWithSshpass,
+  wrapWithAskpass,
   buildCommonSSHFlags,
   buildSSHCommand,
   buildSFTPCommand,
@@ -35,6 +36,7 @@ const {
   buildFTPCommand,
   parseSSHConfig,
   profilesToSSHConfig,
+  findCloudflared,
 } = require('./ssh-utils');
 
 function getBuildNumber() {
@@ -158,6 +160,9 @@ if (process.defaultApp) {
 // Buffer URLs that arrive before the renderer is ready
 let pendingFolderPaths = [];
 let rendererReady = false;
+// Per-window folder path queue keyed by webContents.id — used by
+// target=window (new-window Services) so we don't deliver to the wrong window.
+const pendingFolderPathsByWc = new Map();
 
 function flushPendingFolderPaths() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -197,8 +202,19 @@ function handlePrateekTermUrl(url) {
     const parsed = new URL(url);
     if (parsed.hostname === 'open') {
       const folderPath = parsed.searchParams.get('path') || '';
-      dbgLog(`folderPath="${folderPath}" rendererReady=${rendererReady} mainWindow=${!!mainWindow}`);
+      // target=window spawns a fresh window; default (or target=tab) reuses current.
+      const target     = parsed.searchParams.get('target') || 'tab';
+      dbgLog(`folderPath="${folderPath}" target=${target} rendererReady=${rendererReady} mainWindow=${!!mainWindow}`);
       if (!folderPath) return;
+
+      if (target === 'window') {
+        // New window: deliver path once its renderer signals ready (webContents.id queued)
+        const win = createNewWindow();
+        pendingFolderPathsByWc.set(win.webContents.id, folderPath);
+        dbgLog(`queued open-folder for new window wc=${win.webContents.id}`);
+        return;
+      }
+
       if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
         mainWindow.focus();
@@ -626,17 +642,18 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
 
   terminals.set(id, term);
   terminalOwners.set(id, ownerContents);
-  // Register with the MCP bridge so UI-opened sessions are visible to AI agents
-  // via list_sessions, and can be adopted with run_command / send_input.
-  bridge.ensureBuf(id);
+  // UI-spawned PTYs are NOT auto-registered with the MCP bridge. Sharing a
+  // live user terminal with AI clients means the AI writes to the same PTY
+  // the user is typing in — sentinel markers (MTERM_DONE_…) leak into the
+  // user's view, and the AI can clobber mid-command state. MCP clients must
+  // spawn their own session via `connect` (which registers its own buffer).
 
   term.onData((data) => {
     const owner = terminalOwners.get(id);
     if (owner && !owner.isDestroyed()) {
       owner.send('terminal:data', { id, data });
     }
-    // Feed MCP output buffer so AI agents can read output / detect prompts
-    bridge.appendOutput(id, data);
+    // No bridge.appendOutput here — see ownership comment above.
   });
 
   // Collect askpass temp scripts to delete when the PTY exits
@@ -1137,6 +1154,12 @@ function openUserGuide() {
 
 // ── Help window ──────────────────────────────────────────────────────────
 let helpWindow = null;
+// Cloudflare Access — detect cloudflared binary.
+// overridePath: user-supplied path from the connection form (optional).
+ipcMain.handle('cloudflared:find', (_event, overridePath) => {
+  return findCloudflared(overridePath || null);
+});
+
 ipcMain.handle('help:open', () => {
   if (helpWindow && !helpWindow.isDestroyed()) {
     helpWindow.focus();
@@ -1273,8 +1296,6 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   let isDirectory = false;
   try { isDirectory = fs.statSync(filePath).isDirectory(); } catch { /* let scp report the error */ }
   if (isDirectory) flags.push('-r');
-  dbgLog(`[scp:${transferId}] upload "${fileName}" → ${profile.username||''}@${profile.host}:${remotePath||'~/'} isDir=${isDirectory} pemFile=${!!profile.pemFile}`);
-
   if (profile.port && profile.port !== 22) {
     flags.push('-P', String(profile.port));
   }
@@ -1286,7 +1307,16 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   const dest = remotePath ? `${remotePath}/` : '~/';
   flags.push(filePath, `${userHost}:${dest}`);
 
-  const wrapped = wrapWithSshpass('scp', flags, profile);
+  // Use wrapWithAskpass for password injection — works without sshpass installed.
+  // SSH_ASKPASS_REQUIRE=force makes OpenSSH call the askpass script even in a
+  // headless PTY (no controlling terminal) instead of prompting interactively.
+  const wrapped = wrapWithAskpass('scp', flags, profile);
+  dbgLog(`[scp:${transferId}] upload "${fileName}" → ${userHost}:${dest} isDir=${isDirectory} pemFile=${!!profile.pemFile} hasPassword=${!!profile.password}`);
+  dbgLog(`[scp:${transferId}] cmd: ${wrapped.command} ${wrapped.args.join(' ')}`);
+  if (Object.keys(wrapped.env || {}).length) {
+    dbgLog(`[scp:${transferId}] env: ${Object.keys(wrapped.env).join(', ')}`);
+  }
+
   const env = { ...process.env, ...(wrapped.env || {}) };
   env.TERM = 'xterm-256color';
 
@@ -1300,33 +1330,48 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
       env,
     });
   } catch (err) {
+    // Clean up askpass temp files if spawn fails
+    for (const f of (wrapped._cleanupFiles || [])) {
+      try { fs.unlinkSync(f); } catch { /* already gone */ }
+    }
+    dbgLog(`[scp:${transferId}] spawn error: ${err.message}`);
     return { transferId, error: err.message };
   }
 
   scpTransfers.set(transferId, proc);
 
+  let scpOutput = ''; // accumulate output for error reporting
   const progressRegex = /(\d+)%/;
   proc.onData((data) => {
+    scpOutput += data;
+    dbgLog(`[scp:${transferId}] output: ${data.replace(/\r?\n/g, ' ').trim()}`);
     const match = data.match(progressRegex);
     if (match && !senderContents.isDestroyed()) {
-      senderContents.send('scp:progress', {
-        transferId,
-        fileName,
-        percent: parseInt(match[1], 10),
-      });
+      senderContents.send('scp:progress', { transferId, fileName, percent: parseInt(match[1], 10) });
     }
   });
 
   proc.onExit(({ exitCode }) => {
     scpTransfers.delete(transferId);
-    dbgLog(`[scp:${transferId}] exit code=${exitCode} file="${fileName}"`);
-    if (!senderContents.isDestroyed()) {
-      senderContents.send('scp:complete', {
-        transferId,
-        fileName,
-        success: exitCode === 0,
-        error: exitCode !== 0 ? `SCP exited with code ${exitCode}` : null,
-      });
+    // Clean up askpass temp files written by wrapWithAskpass
+    for (const f of (wrapped._cleanupFiles || [])) {
+      try { fs.unlinkSync(f); } catch { /* already gone */ }
+    }
+    if (exitCode !== 0) {
+      // Extract last non-empty line as the error message for the UI
+      const errLine = scpOutput.split(/\r?\n/).map(l => l.trim()).filter(Boolean).pop() || '';
+      dbgLog(`[scp:${transferId}] FAILED code=${exitCode} file="${fileName}" last_output="${errLine}"`);
+      if (!senderContents.isDestroyed()) {
+        senderContents.send('scp:complete', {
+          transferId, fileName, success: false,
+          error: errLine || `SCP exited with code ${exitCode}`,
+        });
+      }
+    } else {
+      dbgLog(`[scp:${transferId}] OK file="${fileName}"`);
+      if (!senderContents.isDestroyed()) {
+        senderContents.send('scp:complete', { transferId, fileName, success: true, error: null });
+      }
     }
   });
 

@@ -539,6 +539,40 @@ let tabIdCounter = 0;
 const pendingTerminalData = new Map(); // ptyId -> string[]
 const pendingTerminalExit = new Map(); // ptyId -> { exitCode, signal }
 
+// ===== Tab Bar Scroll =====
+
+function initTabScrollButtons() {
+  const bar    = document.getElementById('tabs-container');
+  const btnL   = document.getElementById('tab-scroll-left');
+  const btnR   = document.getElementById('tab-scroll-right');
+  if (!bar || !btnL || !btnR) return;
+
+  const STEP = 180; // px per click
+
+  function updateButtons() {
+    const overflows = bar.scrollWidth > bar.clientWidth + 2;
+    btnL.classList.toggle('visible', overflows);
+    btnR.classList.toggle('visible', overflows);
+    btnL.disabled = bar.scrollLeft <= 0;
+    btnR.disabled = bar.scrollLeft + bar.clientWidth >= bar.scrollWidth - 2;
+  }
+
+  btnL.addEventListener('click', () => {
+    bar.scrollBy({ left: -STEP, behavior: 'smooth' });
+  });
+  btnR.addEventListener('click', () => {
+    bar.scrollBy({ left: STEP, behavior: 'smooth' });
+  });
+
+  bar.addEventListener('scroll', updateButtons, { passive: true });
+
+  // Re-check after layout changes (tabs added/removed/resized)
+  new ResizeObserver(updateButtons).observe(bar);
+
+  // Expose so renderTabBar can call it after DOM changes
+  initTabScrollButtons._update = updateButtons;
+}
+
 // ===== DOM References =====
 const dom = {
   tabsContainer: document.getElementById('tabs-container'),
@@ -584,6 +618,15 @@ const dom = {
   telnetOptionsSection: document.getElementById('telnet-options-section'),
   ftpOptionsSection: document.getElementById('ftp-options-section'),
   serialOptionsSection: document.getElementById('serial-options-section'),
+  cloudflareSection: document.getElementById('cloudflare-section'),
+  cfAccessEnabled: document.getElementById('cf-access-enabled'),
+  cfAccessBody: document.getElementById('cf-access-body'),
+  cfStatus: document.getElementById('cf-status'),
+  cfStatusIcon: document.getElementById('cf-status-icon'),
+  cfStatusText: document.getElementById('cf-status-text'),
+  cfPathRow: document.getElementById('cf-path-row'),
+  cfPathInput: document.getElementById('cf-path-input'),
+  btnCfDetect: document.getElementById('btn-cf-detect'),
   serialPort: document.getElementById('serial-port'),
   serialBaud: document.getElementById('serial-baud'),
   serialDatabits: document.getElementById('serial-databits'),
@@ -750,7 +793,26 @@ async function createTab(options = {}) {
     
     groupId: options.groupId || deriveGroupId(protocol, options.connectionProfile),
     displayOrder: state.tabs.length,
+    // Remote cwd tracked via OSC 7 escape sequence emitted by the shell.
+    // Used as SCP drag-drop destination when present. See registerOscHandler below.
+    _remoteCwd: null,
+    // Full local cwd path (for session restore). Distinct from `_lastCwd`
+    // which holds only the basename (used for tab title display).
+    _cwdPath: null,
   };
+
+  // OSC 7 — standard shell-to-terminal cwd reporting. Shells emit:
+  //   ESC ] 7 ; file://hostname/absolute/path ESC \
+  // zsh/fish emit this by default; bash/sh need PROMPT_COMMAND (auto-injected
+  // for SSH tabs after connect). Parsed path is used as SCP drag-drop destination.
+  term.parser.registerOscHandler(7, (data) => {
+    try {
+      // data = "file://hostname/absolute/path" (hostname optional)
+      const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
+      if (m) tab._remoteCwd = decodeURIComponent(m[1]);
+    } catch { /* ignore malformed OSC 7 payload */ }
+    return true; // mark handled so xterm doesn't echo it
+  });
 
   if (isSerial) {
     // --- Serial path ---
@@ -912,6 +974,32 @@ async function createTab(options = {}) {
       if (tab.ptyId) window.terminalAPI.sendInput(tab.ptyId, data);
     });
 
+    // For SSH tabs: auto-inject a shell-agnostic cwd reporter.
+    //
+    // This must work on: bash, zsh, ash (busybox/dropbear on NTC-502 etc),
+    // dash, ksh. PROMPT_COMMAND alone is bash-only, so we ALSO override
+    // `cd` with a wrapper function — which works on every POSIX shell.
+    //
+    // ── Hiding the injection ───────────────────────────────────────────
+    // To keep the terminal clean, the injection runs in two phases:
+    //   1. Send `stty -echo` → shell stops echoing typed chars
+    //   2. Send the real setup → invisible (no echo), ends with:
+    //        • `stty echo` to restore echo for the user
+    //        • `printf '\e[2F\e[0J'` to wipe the visible `stty -echo` line
+    // Result: one brief flicker of ` stty -echo` then a clean prompt.
+    // Leading space → HISTCONTROL=ignorespace / HIST_IGNORE_SPACE skips history.
+    //
+    // ── Why the injected functions ─────────────────────────────────────
+    //   • _pt_cwd() emits OSC 7 with current $PWD (captured by xterm parser)
+    //   • cd() override calls _pt_cwd after every cd — works on every POSIX shell
+    //   • _pt_cwd fired once immediately so we know cwd at login
+    //   • PROMPT_COMMAND prepend catches pushd/popd/scripts (bash-only, belt-and-suspenders)
+    //
+    // Fires once, ~1.5s after connect (gives prompt time to appear).
+    if (protocol === 'ssh') {
+      injectOscCwdReporter(tab);
+    }
+
     // Clipboard shortcuts — must be set up after ptyId is known.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
@@ -963,6 +1051,7 @@ async function createTab(options = {}) {
       try {
         const cwd = await window.terminalAPI.getRemoteCwd(tab.ptyId);
         if (cwd) {
+          tab._cwdPath = cwd;  // full path → persisted for session restore
           const parts = cwd.split('/').filter(Boolean);
           const dirName = parts.pop() || '/';
           if (dirName !== tab._lastCwd) {
@@ -985,6 +1074,11 @@ async function createTab(options = {}) {
         cwdDebounce = setTimeout(checkCwd, 500);
       }
     });
+
+    // Proactive first probe: populate `_cwdPath` shortly after spawn so a quit
+    // before the user ever presses Enter still persists a real path. Without
+    // this, freshly-restored tabs saved `cwd: null` → next launch lands in $HOME.
+    setTimeout(checkCwd, 600);
   }
 
   // Auto-copy on selection (PuTTY / Linux terminal style)
@@ -1037,12 +1131,15 @@ async function processNextUpload(pane, tab) {
   const label = tab.uploadTotal > 1
     ? `${name}  (${tab.uploadIndex + 1} of ${tab.uploadTotal})`
     : name;
-  showUploadProgressOverlay(pane, label, tab);
+  // Show the resolved destination in the overlay so the user can see where
+  // the file is going (and catch misconfigured destinations early).
+  const destDisplay = tab._uploadRemoteCwd ? `${tab._uploadRemoteCwd}/` : '~/';
+  showUploadProgressOverlay(pane, label, tab, destDisplay);
   const result = await window.terminalAPI.scpUpload(
     filePath, name, tab._uploadProfile, tab._uploadRemoteCwd
   );
   if (result.error) {
-    completeUploadOverlay(pane, false, result.error);
+    completeUploadOverlay(pane, false, result.error, destDisplay);
     tab.uploadQueue = [];
     return;
   }
@@ -1053,8 +1150,10 @@ async function processNextUpload(pane, tab) {
 function advanceUploadQueue(tab, pane, success, error) {
   tab.activeTransferId = null;
   delete pane.dataset.transferId;
+  // Resolve destination once more for success/error overlay (same as processNextUpload)
+  const destDisplay = tab._uploadRemoteCwd ? `${tab._uploadRemoteCwd}/` : '~/';
   if (!success) {
-    completeUploadOverlay(pane, false, error);
+    completeUploadOverlay(pane, false, error, destDisplay);
     tab.uploadQueue = [];
     return;
   }
@@ -1062,7 +1161,7 @@ function advanceUploadQueue(tab, pane, success, error) {
   if (tab.uploadIndex < (tab.uploadQueue || []).length) {
     processNextUpload(pane, tab);
   } else {
-    completeUploadOverlay(pane, true, null);
+    completeUploadOverlay(pane, true, null, destDisplay);
     tab.uploadQueue = [];
   }
 }
@@ -1125,11 +1224,14 @@ function setupPaneDragDrop(pane, tab) {
       profile.pemFile = await window.terminalAPI.saveTempKey(profile.pemText);
     }
 
-    // Use the profile's configured remote path as the upload destination.
+    // Destination priority:
+    //   1. tab._remoteCwd — live-tracked via OSC 7 escapes from the remote shell
+    //      (e.g. user did `cd /tmp` in the SSH session → uploads go to /tmp)
+    //   2. profile.remotePath — user-configured fallback in the connection profile
+    //   3. null → SCP handler defaults to ~/ on the remote host
     // Do NOT call getRemoteCwd here — for SSH tabs that returns the LOCAL cwd
     // of the ssh client process, not the remote server directory.
-    // null → SCP handler defaults to ~/ on the remote host.
-    const remoteCwd = profile.remotePath || null;
+    const remoteCwd = tab._remoteCwd || profile.remotePath || null;
 
     tab._uploadProfile   = profile;
     tab._uploadRemoteCwd = remoteCwd;
@@ -1157,10 +1259,11 @@ function showDropZoneOverlay(pane) {
   pane.appendChild(overlay);
 }
 
-function showUploadProgressOverlay(pane, fileName, tab) {
+function showUploadProgressOverlay(pane, fileName, tab, destPath) {
   removeOverlay(pane, 'upload-progress-overlay');
   const overlay = document.createElement('div');
   overlay.className = 'upload-progress-overlay';
+  const destDisplay = destPath ? `→ ${escapeHtml(destPath)}` : '→ ~/';
   overlay.innerHTML = `
     <div class="upload-info">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1169,11 +1272,13 @@ function showUploadProgressOverlay(pane, fileName, tab) {
         <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
       </svg>
       <span class="upload-file-name">${escapeHtml(fileName)}</span>
+      <span class="upload-dest" title="Destination path">${destDisplay}</span>
       <span class="upload-percent">0%</span>
     </div>
     <div class="upload-progress-bar">
       <div class="upload-progress-fill" style="width: 0%"></div>
     </div>
+    <div class="upload-status-message" style="display:none;"></div>
     <button class="upload-cancel-btn" title="Cancel transfer">&times;</button>
   `;
   overlay.querySelector('.upload-cancel-btn').addEventListener('click', () => {
@@ -1195,9 +1300,11 @@ function updateUploadProgress(pane, percent) {
   if (pctText) pctText.textContent = percent + '%';
 }
 
-function completeUploadOverlay(pane, success, error) {
+function completeUploadOverlay(pane, success, error, destPath) {
   const overlay = pane.querySelector('.upload-progress-overlay');
   if (!overlay) return;
+
+  const statusEl = overlay.querySelector('.upload-status-message');
 
   if (success) {
     overlay.classList.add('success');
@@ -1205,13 +1312,25 @@ function completeUploadOverlay(pane, success, error) {
     const pctText = overlay.querySelector('.upload-percent');
     if (fill) fill.style.width = '100%';
     if (pctText) pctText.textContent = 'Done';
+    // Show the destination path where the file was copied
+    if (statusEl) {
+      const shown = destPath || '~/';
+      statusEl.textContent = `Copied to ${shown}`;
+      statusEl.style.display = 'block';
+    }
     const cancelBtn = overlay.querySelector('.upload-cancel-btn');
     if (cancelBtn) cancelBtn.remove();
-    setTimeout(() => removeOverlay(pane, 'upload-progress-overlay'), 3000);
+    // Leave success toast up longer so the user can read the path
+    setTimeout(() => removeOverlay(pane, 'upload-progress-overlay'), 5000);
   } else {
     overlay.classList.add('error');
     const pctText = overlay.querySelector('.upload-percent');
     if (pctText) pctText.textContent = 'Failed';
+    // Show the actual error message (e.g. "Read-only file system", "No route to host")
+    if (statusEl) {
+      statusEl.textContent = error ? String(error) : 'Upload failed (no details)';
+      statusEl.style.display = 'block';
+    }
     const cancelBtn = overlay.querySelector('.upload-cancel-btn');
     if (cancelBtn) {
       cancelBtn.textContent = 'Dismiss';
@@ -1329,6 +1448,12 @@ function renderTabBar() {
       dom.tabsContainer.appendChild(groupSep);
     }
   }
+
+  // Refresh scroll-arrow visibility after DOM is fully populated.
+  // rAF ensures the browser has laid out the new tab widths first.
+  requestAnimationFrame(() => {
+    if (initTabScrollButtons._update) initTabScrollButtons._update();
+  });
 }
 
 function renderTab(tab, parentEl = null) {
@@ -1519,7 +1644,10 @@ function activateTab(tabId) {
   }
 
   document.querySelectorAll('.tab').forEach((el) => {
-    el.classList.toggle('active', parseInt(el.dataset.tabId) === tabId);
+    const isActive = parseInt(el.dataset.tabId) === tabId;
+    el.classList.toggle('active', isActive);
+    // Ensure active tab is visible in the scroll container
+    if (isActive) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   });
 
   state.tabs.forEach((tab) => {
@@ -1682,7 +1810,9 @@ function buildSessionData() {
       groupId:           t.groupId,  // NEW
       connectionProfileId: t.connectionProfile?.id || null,
       scrollback:        captureScrollback(t.term),
-      cwd:               t._lastCwd || null,
+      // Full path for restore: OSC 7 remote cwd (SSH) or local cwd poller result.
+      // `_lastCwd` is basename-only — never use it for restoration.
+      cwd:               t._remoteCwd || t._cwdPath || null,
     }));
   return {
     savedAt: new Date().toISOString(),
@@ -1690,6 +1820,126 @@ function buildSessionData() {
     groups: state.groups,  // NEW
     tabs,
   };
+}
+
+// POSIX shell quote: wraps in single quotes, escapes embedded single quotes.
+// Safe for any filesystem path (spaces, `$`, `"`, `;`, etc.).
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+// Inject the OSC 7 cwd reporter into an SSH tab's shell.
+//
+// Must work on: bash, zsh, ash (busybox/dropbear), dash, ksh.
+// PROMPT_COMMAND alone is bash-only, so we ALSO override `cd` with a wrapper
+// function — which works on every POSIX shell.
+//
+// ── Why prompt-detection (not a timer) ─────────────────────────────
+// A fixed setTimeout(1500) is brittle: slow devices (embedded routers) may
+// still be printing MOTD / finishing login when the timer fires → the
+// `stty -echo` never reaches an idle shell → the injection gets echoed
+// verbatim into the terminal AND lands in history.
+// Instead we watch the PTY output stream (`onTerminalData` dispatcher) and
+// fire only when the shell has drawn a prompt AND the password auto-type
+// flow has completed.
+//
+// ── Hiding the injection ───────────────────────────────────────────
+// Two phases, BOTH leading-space so `HISTCONTROL=ignorespace` /
+// `HIST_IGNORE_SPACE` skips them from history on bash/zsh:
+//   1. ` stty -echo` → shell stops echoing typed chars
+//   2. ` <setup>` → invisible (no echo), ends with:
+//        • `stty echo` to restore echo
+//        • `printf '\e[2F\e[0J'` to wipe the visible `stty -echo` line
+//
+// Safe to call multiple times — `_oscInjected` guards against double-inject.
+// Callers that want to force re-injection (reconnect) MUST clear
+// `_oscInjected`, `_oscWatchBuf`, and `_oscDebounceTimer` first.
+function injectOscCwdReporter(tab) {
+  // Just arm the watcher — the actual send happens from onTerminalData once a
+  // prompt is detected. See fireOscInjection() below.
+  tab._oscWatchBuf = '';
+  tab._oscDebounceTimer = null;
+}
+
+// Called from onTerminalData when a shell prompt is detected and idle.
+function fireOscInjection(tab) {
+  if (!tab.ptyId || tab._oscInjected) return;
+  tab._oscInjected = true;
+  tab._oscWatchBuf = '';
+  clearTimeout(tab._oscDebounceTimer);
+  tab._oscDebounceTimer = null;
+
+  // Phase 1: disable echo (leading space → history skip)
+  window.terminalAPI.sendInput(tab.ptyId, ` stty -echo 2>/dev/null\r`);
+
+  // Phase 2: setup (leading space → history skip; invisible because echo off)
+  setTimeout(() => {
+    if (!tab.ptyId) return;
+    const setup =
+      ` _pt_cwd(){ printf '\\033]7;file://%s%s\\033\\\\' ` +
+      `"\${HOSTNAME:-$(hostname 2>/dev/null)}" "$PWD"; };` +
+      `cd(){ command cd "$@" && _pt_cwd; };` +
+      `_pt_cwd;` +
+      `export PROMPT_COMMAND="_pt_cwd; \${PROMPT_COMMAND:-:}";` +
+      `stty echo 2>/dev/null;` +
+      // Erase the visible `stty -echo` line and redraw prompt on that row
+      `printf '\\033[2F\\033[0J'` +
+      `\r`;
+    window.terminalAPI.sendInput(tab.ptyId, setup);
+  }, 300);
+}
+
+// Watch PTY output for a shell prompt (SSH tabs only). Called from
+// onTerminalData for every chunk. Fires injection once the output stream
+// goes quiet at a prompt (debounced 400ms).
+function maybeFireOscInjection(tab, data) {
+  if (tab.protocol !== 'ssh') return;
+  if (tab._oscInjected) return;
+  // Password auto-type still pending → keep waiting, we're not at shell yet
+  if (tab._pendingPassword) return;
+  if (tab._oscWatchBuf === undefined) return; // injection not armed yet
+
+  tab._oscWatchBuf = (tab._oscWatchBuf + data).slice(-512);
+
+  // Strip ANSI escape sequences before matching (some shells draw colored
+  // prompts with trailing reset codes that hide the `#`/`$` at buffer end).
+  // eslint-disable-next-line no-control-regex
+  const clean = tab._oscWatchBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+
+  // Prompt at end of buffer: #, $, >, % followed by optional whitespace.
+  // Password prompts end in `:` — excluded naturally.
+  const atPrompt = /[#$>%]\s*$/.test(clean);
+  if (atPrompt) {
+    clearTimeout(tab._oscDebounceTimer);
+    // 400ms of quiet after the prompt → shell is idle → safe to inject
+    tab._oscDebounceTimer = setTimeout(() => fireOscInjection(tab), 400);
+  } else {
+    clearTimeout(tab._oscDebounceTimer);
+    tab._oscDebounceTimer = null;
+  }
+}
+
+// Restore the working directory of a tab by injecting `cd <path>`.
+//   • Leading space → skipped by HISTCONTROL=ignorespace / HIST_IGNORE_SPACE
+//   • For SSH tabs, wait long enough for the OSC 7 auto-inject to finish
+//     (1500ms + 300ms phase-2) so `cd` uses the overridden `cd()` that emits OSC 7.
+//   • Pre-seeds `_cwdPath` / `_remoteCwd` so drag-drop works before shell responds.
+function scheduleCwdRestore(tab, savedCwd, protocol) {
+  if (!savedCwd || !tab) return;
+  // Guard against legacy session files that stored only a basename
+  // (pre-2026-04-23, `_lastCwd` was saved — basename-only, not absolute).
+  // `cd packaging` from $HOME fails; better to skip than mislead.
+  if (!String(savedCwd).startsWith('/')) return;
+  if (protocol === 'local') {
+    tab._cwdPath = savedCwd;
+  } else {
+    tab._remoteCwd = savedCwd;
+  }
+  const delay = protocol === 'local' ? 500 : 2200;
+  setTimeout(() => {
+    if (!tab.ptyId) return;
+    window.terminalAPI.sendInput(tab.ptyId, ` cd ${shellQuote(savedCwd)}\r`);
+  }, delay);
 }
 
 function writeScrollbackHistory(tab, lines) {
@@ -1739,6 +1989,7 @@ async function restoreSession() {
         await createTab({ protocol: 'local', name: saved.name || 'Terminal' });
         const tab = state.tabs[state.tabs.length - 1];
         writeScrollbackHistory(tab, saved.scrollback);
+        scheduleCwdRestore(tab, saved.cwd, 'local');
         lastTabId = tab.id;
 
       } else if (profile) {
@@ -1755,6 +2006,7 @@ async function restoreSession() {
         });
         const tab = state.tabs[state.tabs.length - 1];
         writeScrollbackHistory(tab, saved.scrollback);
+        scheduleCwdRestore(tab, saved.cwd, saved.protocol);
         lastTabId = tab.id;
       }
     } catch (e) {
@@ -2154,6 +2406,20 @@ async function reconnectTab(tab) {
       if (shellCommand && result.debugCmd) {
         tab.term.writeln(`\x1b[90m▶ ${result.debugCmd}\x1b[0m`);
       }
+
+      // Reconnect spawned a fresh shell — the `cd()` override, `_pt_cwd`,
+      // and PROMPT_COMMAND from the previous shell are gone. Clear state
+      // and re-inject so drag-drop uploads continue to use the live cwd.
+      // Without this, `_remoteCwd` keeps its pre-reconnect (or pre-seeded
+      // from session restore) value — SCP uploads land in the wrong dir.
+      if (tab.protocol === 'ssh') {
+        tab._oscInjected = false;
+        tab._remoteCwd   = null;
+        clearTimeout(tab._oscDebounceTimer);
+        tab._oscDebounceTimer = null;
+        tab._oscWatchBuf = '';
+        injectOscCwdReporter(tab);
+      }
     }
   } catch (err) {
     tab.term.write(`\r\n\x1b[31m[Reconnect failed: ${err.message}]\x1b[0m\r\n`);
@@ -2220,6 +2486,11 @@ function setupTerminalListeners() {
           setTimeout(() => window.terminalAPI.sendInput(id, pwd + '\r'), 300);
         }
       }
+
+      // Detect shell prompt → trigger OSC 7 reporter injection (SSH tabs).
+      // Replaces the old setTimeout(1500) which fired too early on slow
+      // devices and left the injection text visible in the terminal.
+      maybeFireOscInjection(tab, data);
 
       tab.term.write(data);
       if (tab.logId) window.terminalAPI.logWrite(tab.logId, data);
@@ -2967,6 +3238,7 @@ function updateProtocolSections() {
   dom.telnetOptionsSection.classList.toggle('hidden', protocol !== 'telnet');
   dom.ftpOptionsSection.classList.toggle('hidden', protocol !== 'ftp');
   dom.serialOptionsSection.classList.toggle('hidden', !isSerial);
+  dom.cloudflareSection.classList.toggle('hidden', !isSSH);
 
   if (isSerial) {
     populateSerialPorts();
@@ -3001,6 +3273,54 @@ function setSSHMode(mode) {
   document.querySelectorAll('.scp-only-option').forEach((el) => {
     el.classList.toggle('hidden', mode !== 'scp');
   });
+}
+
+// ---------------------------------------------------------------------------
+// Cloudflare Access detection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Set the cloudflared status indicator.
+ * state: 'idle' | 'detecting' | 'found' | 'notfound'
+ */
+function setCfStatus(state_) {
+  const icons = { idle: '', detecting: '⏳', found: '✅', notfound: '❌' };
+  const texts = {
+    idle: '',
+    detecting: 'Checking for cloudflared…',
+    found: '',      // filled in by caller with version string
+    notfound: 'cloudflared not found — install via Homebrew or enter path below',
+  };
+  dom.cfStatus.className = `cf-status cf-status-${state_}`;
+  dom.cfStatusIcon.textContent = icons[state_] || '';
+  if (state_ !== 'found') dom.cfStatusText.textContent = texts[state_] || '';
+  // Show path input when not found so user can supply path
+  dom.cfPathRow.classList.toggle('hidden', state_ !== 'notfound');
+}
+
+/**
+ * Detect cloudflared binary, update status UI.
+ * overridePath: string|null — if set, try that path first.
+ */
+async function runCloudflaredDetect(overridePath) {
+  setCfStatus('detecting');
+  try {
+    const result = await window.terminalAPI.cloudflaredFind(overridePath || null);
+    if (result && result.path) {
+      dom.cfStatusIcon.textContent = '✅';
+      dom.cfStatusText.textContent = `Found: ${result.path}  (${result.version || 'version unknown'})`;
+      dom.cfStatus.className = 'cf-status cf-status-found';
+      dom.cfPathRow.classList.add('hidden');
+      // Store detected path in input so it's saved with profile
+      if (!dom.cfPathInput.value.trim()) {
+        dom.cfPathInput.value = result.path;
+      }
+    } else {
+      setCfStatus('notfound');
+    }
+  } catch {
+    setCfStatus('notfound');
+  }
 }
 
 function setSCPDirection(direction) {
@@ -3041,6 +3361,9 @@ function getFormData() {
     data.scpRecursive = dom.optScpRecursive.checked;
     data.scpLegacy = dom.optScpLegacy.checked;
     data.extraOptions = dom.connExtraOptions.value.trim();
+
+    data.cloudflareAccess = dom.cfAccessEnabled.checked;
+    data.cloudflaredPath = dom.cfAccessEnabled.checked ? (dom.cfPathInput.value.trim() || null) : null;
 
     if (state.sshMode === 'scp') {
       data.direction = state.scpDirection;
@@ -3101,6 +3424,17 @@ function populateForm(profile) {
     dom.optScpRecursive.checked = profile.scpRecursive || false;
     dom.optScpLegacy.checked = profile.scpLegacy || false;
     dom.connExtraOptions.value = profile.extraOptions || '';
+
+    const cfEnabled = !!profile.cloudflareAccess;
+    dom.cfAccessEnabled.checked = cfEnabled;
+    dom.cfAccessBody.classList.toggle('hidden', !cfEnabled);
+    dom.cfPathInput.value = profile.cloudflaredPath || '';
+    if (cfEnabled) {
+      // Re-run detection so status reflects current binary state
+      runCloudflaredDetect(profile.cloudflaredPath || null);
+    } else {
+      setCfStatus('idle');
+    }
 
     if (profile.sshMode === 'scp') {
       setSCPDirection(profile.direction || 'upload');
@@ -3768,6 +4102,27 @@ function setupEventListeners() {
     if (dom.optIpv6.checked) dom.optIpv4.checked = false;
   });
 
+  // Cloudflare Access checkbox
+  dom.cfAccessEnabled.addEventListener('change', () => {
+    const enabled = dom.cfAccessEnabled.checked;
+    dom.cfAccessBody.classList.toggle('hidden', !enabled);
+    if (enabled) {
+      runCloudflaredDetect(dom.cfPathInput.value.trim() || null);
+      // Auto-add 'cloudflare' tag when the checkbox is first enabled
+      if (!state.currentTags.some(t => t.name === 'cloudflare')) {
+        state.currentTags.push({ name: 'cloudflare', color: '#F6821F' });
+        renderFormTags();
+      }
+    } else {
+      setCfStatus('idle');
+    }
+  });
+
+  // Manual re-detect button
+  dom.btnCfDetect.addEventListener('click', () => {
+    runCloudflaredDetect(dom.cfPathInput.value.trim() || null);
+  });
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 't') {
@@ -4292,6 +4647,7 @@ async function init() {
   try {
     await loadXtermModules();
     setupTerminalListeners();
+    initTabScrollButtons();
     try {
       setupEventListeners();
     } catch (e) {

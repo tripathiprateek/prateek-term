@@ -74,7 +74,9 @@
 
   <!-- Tab Bar -->
   <div id="tab-bar">
+    <button id="tab-scroll-left"  class="tab-scroll-btn" aria-label="Scroll tabs left">&#8249;</button>
     <div id="tabs-container"></div>
+    <button id="tab-scroll-right" class="tab-scroll-btn" aria-label="Scroll tabs right">&#8250;</button>
   </div>
 
   <!-- Main Area: Sidebar + Terminal -->
@@ -299,6 +301,52 @@
                       </button>
                     </div>
                     <span class="form-hint">Password is passed via SSHPASS env var (requires sshpass installed)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Section: Cloudflare Access (SSH only) -->
+              <div id="cloudflare-section" class="form-section hidden">
+                <div class="form-section-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                  </svg>
+                  Cloudflare Access
+                </div>
+
+                <div class="form-row">
+                  <label class="cf-toggle-label">
+                    <input type="checkbox" id="cf-access-enabled">
+                    <span>Connect via Cloudflare Access</span>
+                  </label>
+                </div>
+
+                <div id="cf-access-body" class="hidden">
+                  <!-- Detection status -->
+                  <div id="cf-status" class="cf-status cf-status-detecting">
+                    <span id="cf-status-icon" class="cf-status-icon">⏳</span>
+                    <span id="cf-status-text">Checking for cloudflared…</span>
+                  </div>
+
+                  <!-- Path override (shown when not found or user wants to override) -->
+                  <div id="cf-path-row" class="form-row hidden">
+                    <div class="form-group">
+                      <label for="cf-path-input">cloudflared path</label>
+                      <div class="input-with-button">
+                        <input type="text" id="cf-path-input" placeholder="/opt/homebrew/bin/cloudflared" autocomplete="off">
+                        <button type="button" id="btn-cf-detect" class="btn btn-small btn-secondary">Detect</button>
+                      </div>
+                      <span class="form-hint">Install: <code>brew install cloudflare/cloudflare/cloudflared</code></span>
+                    </div>
+                  </div>
+
+                  <!-- Username warning -->
+                  <div class="cf-warning">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Username must match your Cloudflare Access policy identity (email prefix or POSIX user).
                   </div>
                 </div>
               </div>

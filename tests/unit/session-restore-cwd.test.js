@@ -1,0 +1,113 @@
+'use strict';
+/**
+ * tests/unit/session-restore-cwd.test.js
+ *
+ * When Prateek-Term restores tabs on launch, each tab should land in the
+ * working directory it had when the app was closed. Previously tabs came
+ * back in $HOME because:
+ *   1. `tab._lastCwd` stored only the basename ("tmp"), not the full path
+ *   2. `restoreSession` never used `saved.cwd` — no `cd` was injected
+ *
+ * This suite pins the fix: full path is saved, and a `cd` is scheduled
+ * post-restore. Pure-logic tests for `shellQuote` + source-contract tests
+ * to prevent regression.
+ */
+
+const fs   = require('fs');
+const path = require('path');
+
+// Pure POSIX shell-quote — mirrors the helper in app.js.
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+describe('shellQuote — POSIX safe paths', () => {
+  test('simple path', () => {
+    expect(shellQuote('/tmp')).toBe(`'/tmp'`);
+  });
+  test('path with spaces', () => {
+    expect(shellQuote('/home/user/My Docs')).toBe(`'/home/user/My Docs'`);
+  });
+  test('path containing single quote', () => {
+    // /home/user's-dir → '/home/user'\''s-dir'
+    expect(shellQuote(`/home/user's-dir`)).toBe(`'/home/user'\\''s-dir'`);
+  });
+  test('path with shell metacharacters', () => {
+    expect(shellQuote('/tmp/$VAR;`cmd`')).toBe(`'/tmp/$VAR;\`cmd\`'`);
+  });
+  test('empty string', () => {
+    expect(shellQuote('')).toBe(`''`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source-contract: app.js must persist full cwd and inject cd on restore
+// ---------------------------------------------------------------------------
+
+const APP_JS = path.resolve(__dirname, '../../src/renderer/js/app.js');
+let appSource;
+beforeAll(() => { appSource = fs.readFileSync(APP_JS, 'utf8'); });
+
+describe('app.js — full cwd path is tracked (not just basename)', () => {
+  test('tab has _cwdPath field for full local cwd', () => {
+    expect(appSource).toMatch(/_cwdPath:\s*null/);
+  });
+
+  test('local cwd poller stores full path to _cwdPath', () => {
+    // tab._cwdPath = cwd  (the full path, before basename extraction)
+    expect(appSource).toMatch(/tab\._cwdPath\s*=\s*cwd/);
+  });
+});
+
+describe('app.js — session save uses full path, never basename', () => {
+  test('buildSessionData uses _remoteCwd or _cwdPath, NOT _lastCwd', () => {
+    // The save must NOT use _lastCwd (basename-only).
+    expect(appSource).toMatch(/cwd:\s*t\._remoteCwd\s*\|\|\s*t\._cwdPath/);
+    // Source-contract: make sure the old bug doesn't sneak back
+    expect(appSource).not.toMatch(/cwd:\s*t\._lastCwd\s*\|\|/);
+  });
+});
+
+describe('app.js — restoreSession injects cd to saved path', () => {
+  test('shellQuote helper exists for POSIX-safe path injection', () => {
+    expect(appSource).toMatch(/function shellQuote\(s\)/);
+  });
+
+  test('scheduleCwdRestore helper exists', () => {
+    expect(appSource).toMatch(/function scheduleCwdRestore\(tab,\s*savedCwd,\s*protocol\)/);
+  });
+
+  test('scheduleCwdRestore sends ` cd <quoted-path>` (leading space for history skip)', () => {
+    expect(appSource).toMatch(/sendInput\(tab\.ptyId,\s*` cd \$\{shellQuote\(savedCwd\)\}\\r`\)/);
+  });
+
+  test('SSH delay ≥ 2000ms so OSC 7 inject (~1800ms) finishes first', () => {
+    // protocol === 'local' ? 500 : 2200
+    expect(appSource).toMatch(/protocol === 'local' \? 500 : 2200/);
+  });
+
+  test('pre-seeds _cwdPath (local) or _remoteCwd (ssh) for immediate drag-drop', () => {
+    expect(appSource).toMatch(/tab\._cwdPath\s*=\s*savedCwd/);
+    expect(appSource).toMatch(/tab\._remoteCwd\s*=\s*savedCwd/);
+  });
+
+  test('restoreSession calls scheduleCwdRestore for both local and ssh branches', () => {
+    const localCalls = appSource.match(/scheduleCwdRestore\(tab,\s*saved\.cwd,\s*'local'\)/g) || [];
+    const sshCalls   = appSource.match(/scheduleCwdRestore\(tab,\s*saved\.cwd,\s*saved\.protocol\)/g) || [];
+    expect(localCalls.length).toBe(1);
+    expect(sshCalls.length).toBe(1);
+  });
+
+  test('skips non-absolute paths (legacy basename-only format)', () => {
+    // Old code saved basename via `_lastCwd`; new code must not inject `cd packaging`
+    expect(appSource).toMatch(/if \(!String\(savedCwd\)\.startsWith\('\/'\)\) return/);
+  });
+});
+
+describe('app.js — proactive first cwd probe on spawn', () => {
+  test('local tabs get a setTimeout(checkCwd, 600) after spawn', () => {
+    // Without this, freshly-restored tabs save `cwd: null` if user quits
+    // before pressing Enter, and next restore lands in $HOME again.
+    expect(appSource).toMatch(/setTimeout\(checkCwd,\s*600\)/);
+  });
+});

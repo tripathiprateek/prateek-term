@@ -126,6 +126,64 @@ function wrapWithSshpass(command, args, profile) {
 }
 
 // ---------------------------------------------------------------------------
+// Cloudflare Access (cloudflared) detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Common installation paths for the cloudflared binary.
+ * Checked in order; falls back to PATH lookup via `which`.
+ */
+const CLOUDFLARED_CANDIDATES = [
+  '/opt/homebrew/bin/cloudflared',  // Apple Silicon Homebrew
+  '/usr/local/bin/cloudflared',     // Intel Homebrew
+  '/usr/bin/cloudflared',
+  '/usr/local/sbin/cloudflared',
+];
+
+/**
+ * Return the full path to cloudflared and its version, or null if not found.
+ * Runs `cloudflared version` to confirm the binary is executable.
+ */
+function findCloudflared(overridePath) {
+  const candidates = overridePath
+    ? [overridePath, ...CLOUDFLARED_CANDIDATES]
+    : CLOUDFLARED_CANDIDATES;
+
+  for (const p of candidates) {
+    try {
+      fs.accessSync(p, fs.constants.X_OK);
+      const ver = execSync(`"${p}" version 2>&1`, { stdio: 'pipe', timeout: 4000 })
+        .toString().trim().split('\n')[0];
+      return { path: p, version: ver };
+    } catch { /* try next */ }
+  }
+  // PATH fallback
+  try {
+    const p = execSync('which cloudflared', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim();
+    if (p) {
+      const ver = execSync(`"${p}" version 2>&1`, { stdio: 'pipe', timeout: 4000 })
+        .toString().trim().split('\n')[0];
+      return { path: p, version: ver };
+    }
+  } catch { /* not found */ }
+  return null;
+}
+
+/**
+ * Build the ProxyCommand flag for Cloudflare Access SSH.
+ * Returns an array of SSH flags to append: ['-o', 'ProxyCommand=...'].
+ *
+ * Quoting: the ProxyCommand value is passed as a single -o argument.
+ * SSH splits it at the first `=` — the value after `=` is the command.
+ * cloudflared binary path must not contain spaces (Homebrew paths never do).
+ */
+function buildCloudflareProxyFlags(cloudflaredBin, hostname) {
+  const bin = cloudflaredBin || 'cloudflared';
+  return ['-o', `ProxyCommand=${bin} access ssh --hostname %h`];
+}
+
+// ---------------------------------------------------------------------------
 // SSH flag building
 // ---------------------------------------------------------------------------
 
@@ -200,6 +258,13 @@ function buildSSHCommand(profile) {
 
   if (profile.port && profile.port !== 22) {
     args.push('-p', String(profile.port));
+  }
+
+  // Cloudflare Access: inject ProxyCommand so SSH tunnels through cloudflared.
+  // The binary path is stored in profile.cloudflaredPath (null = use PATH).
+  if (profile.cloudflareAccess) {
+    const cfFlags = buildCloudflareProxyFlags(profile.cloudflaredPath || null);
+    args.push(...cfFlags);
   }
 
   const userHost = profile.username
@@ -402,4 +467,6 @@ module.exports = {
   buildFTPCommand,
   parseSSHConfig,
   profilesToSSHConfig,
+  findCloudflared,
+  buildCloudflareProxyFlags,
 };

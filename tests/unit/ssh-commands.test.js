@@ -12,6 +12,7 @@ const {
   buildSCPCommand,
   buildTelnetCommand,
   buildFTPCommand,
+  buildCloudflareProxyFlags,
 } = require('../../src/main/ssh-utils');
 
 const BASE = {
@@ -167,5 +168,57 @@ describe('buildFTPCommand', () => {
   test('formats as user@host', () => {
     const { args } = buildFTPCommand({ host: 'ftp.example.com', username: 'bob' });
     expect(args[args.length - 1]).toBe('bob@ftp.example.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cloudflare Access ProxyCommand
+// ---------------------------------------------------------------------------
+
+describe('buildCloudflareProxyFlags', () => {
+  test('returns -o ProxyCommand flag array', () => {
+    const flags = buildCloudflareProxyFlags('/usr/local/bin/cloudflared', 'ssh.example.com');
+    expect(flags).toEqual(['-o', 'ProxyCommand=/usr/local/bin/cloudflared access ssh --hostname %h']);
+  });
+
+  test('falls back to "cloudflared" when no bin path given', () => {
+    const flags = buildCloudflareProxyFlags(null, 'ssh.example.com');
+    expect(flags[1]).toMatch(/^ProxyCommand=cloudflared /);
+  });
+});
+
+describe('buildSSHCommand with cloudflareAccess', () => {
+  test('injects ProxyCommand when cloudflareAccess is true', () => {
+    const { args } = buildSSHCommand({
+      ...BASE,
+      cloudflareAccess: true,
+      cloudflaredPath: '/opt/homebrew/bin/cloudflared',
+    });
+    const oIdx = args.indexOf('-o');
+    // Find the -o ProxyCommand= entry
+    const proxyEntry = args.find(a => typeof a === 'string' && a.startsWith('ProxyCommand='));
+    expect(proxyEntry).toBeDefined();
+    expect(proxyEntry).toContain('cloudflared access ssh --hostname %h');
+  });
+
+  test('does NOT inject ProxyCommand when cloudflareAccess is false', () => {
+    const { args } = buildSSHCommand({ ...BASE, cloudflareAccess: false });
+    const proxyEntry = args.find(a => typeof a === 'string' && a.startsWith('ProxyCommand='));
+    expect(proxyEntry).toBeUndefined();
+  });
+
+  test('does NOT inject ProxyCommand when cloudflareAccess is absent', () => {
+    const { args } = buildSSHCommand(BASE);
+    const proxyEntry = args.find(a => typeof a === 'string' && a.startsWith('ProxyCommand='));
+    expect(proxyEntry).toBeUndefined();
+  });
+
+  test('command is still "ssh" (no sshpass wrap)', () => {
+    const { command } = buildSSHCommand({
+      ...BASE,
+      cloudflareAccess: true,
+      cloudflaredPath: '/opt/homebrew/bin/cloudflared',
+    });
+    expect(command).toBe('ssh');
   });
 });

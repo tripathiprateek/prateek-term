@@ -118,6 +118,11 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   debugClearLog: () => ipcRenderer.send('debug:clearLog'),
   debugOpenLogFolder: () => ipcRenderer.send('debug:openLogFolder'),
 
+  // Cloudflare Access — find the cloudflared binary.
+  // Pass an optional user-supplied path; returns { path, version } or null.
+  cloudflaredFind: (overridePath) =>
+    ipcRenderer.invoke('cloudflared:find', overridePath || null),
+
   // Signal main process that renderer init is complete
   rendererReady: () => ipcRenderer.send('renderer:ready'),
 
