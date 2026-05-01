@@ -3920,6 +3920,13 @@ function setupEventListeners() {
       setTimeout(() => { btn.textContent = orig; }, 1500);
     }
   });
+  document.getElementById('btn-debug-rotate-now')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-debug-rotate-now');
+    if (btn) { btn.disabled = true; btn.textContent = 'Rotating…'; }
+    await window.terminalAPI.debugRotateLog?.();
+    await loadDebugLog();
+    if (btn) { btn.disabled = false; btn.textContent = 'Rotate Now'; }
+  });
   document.getElementById('btn-debug-show-file')?.addEventListener('click', () => {
     window.terminalAPI.debugOpenLogFolder();
     const btn = document.getElementById('btn-debug-show-file');
@@ -4180,7 +4187,16 @@ function setupEventListeners() {
 
 const DEFAULT_MCP_PORT = 29419;
 
-let settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: DEFAULT_MCP_PORT };
+let settingsState = {
+  profilesPath: '',
+  theme: 'catppuccin-mocha',
+  debugLogging: false,
+  mcpEnabled: false,
+  mcpPort: DEFAULT_MCP_PORT,
+  logRotateSizeMB: 50,
+  logRotateAgeDays: 30,
+  logRotateMaxFiles: 5,
+};
 
 
 function renderGroupsList() {
@@ -4308,7 +4324,24 @@ function deleteGroup(groupId) {
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
-  settingsState = { profilesPath: '', theme: 'catppuccin-mocha', debugLogging: false, mcpEnabled: false, mcpPort: DEFAULT_MCP_PORT, ...s };
+  settingsState = {
+    profilesPath: '',
+    theme: 'catppuccin-mocha',
+    debugLogging: false,
+    mcpEnabled: false,
+    mcpPort: DEFAULT_MCP_PORT,
+    logRotateSizeMB: 50,
+    logRotateAgeDays: 30,
+    logRotateMaxFiles: 5,
+    ...s,
+  };
+  // Populate rotation inputs
+  const rotSizeEl     = document.getElementById('log-rotate-size');
+  const rotAgeEl      = document.getElementById('log-rotate-age');
+  const rotMaxEl      = document.getElementById('log-rotate-max-files');
+  if (rotSizeEl) rotSizeEl.value = settingsState.logRotateSizeMB;
+  if (rotAgeEl)  rotAgeEl.value  = settingsState.logRotateAgeDays;
+  if (rotMaxEl)  rotMaxEl.value  = settingsState.logRotateMaxFiles;
   document.getElementById('settings-profiles-path').value = s.profilesPath || '';
   renderThemePicker(settingsState.theme);
 
@@ -4534,6 +4567,14 @@ async function chooseProfilesPath() {
 }
 
 async function saveSettings() {
+  // Collect rotation values from inputs before saving
+  const rotSizeEl = document.getElementById('log-rotate-size');
+  const rotAgeEl  = document.getElementById('log-rotate-age');
+  const rotMaxEl  = document.getElementById('log-rotate-max-files');
+  if (rotSizeEl)  settingsState.logRotateSizeMB   = Math.max(0, parseInt(rotSizeEl.value,  10) || 0);
+  if (rotAgeEl)   settingsState.logRotateAgeDays  = Math.max(0, parseInt(rotAgeEl.value,   10) || 0);
+  if (rotMaxEl)   settingsState.logRotateMaxFiles = Math.max(1, parseInt(rotMaxEl.value,   10) || 1);
+
   await window.terminalAPI.saveSettings(settingsState);
   applyTheme(settingsState.theme);
   setSettingsStatus('Settings saved.');
@@ -4543,18 +4584,29 @@ async function saveSettings() {
 
 // ===== Debug Log =====
 
+function fmtBytes(bytes) {
+  if (bytes < 1024)        return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 async function loadDebugLog() {
-  const contentEl = document.getElementById('debug-log-content');
-  const meta = document.getElementById('debug-log-meta');
-  const pathEl = document.getElementById('debug-log-path');
+  const contentEl  = document.getElementById('debug-log-content');
+  const meta       = document.getElementById('debug-log-meta');
+  const pathEl     = document.getElementById('debug-log-path');
+  const archivesEl = document.getElementById('debug-log-archives');
   if (!contentEl) return;
 
   contentEl.textContent = 'Loading…';
   try {
-    const result = await window.terminalAPI.debugGetLog();
+    const [result, archives] = await Promise.all([
+      window.terminalAPI.debugGetLog(),
+      window.terminalAPI.debugListArchives?.() ?? [],
+    ]);
+
     // Defensive: content must be a string
     const content = typeof result?.content === 'string' ? result.content : '';
-    const size = typeof result?.size === 'number' ? result.size : 0;
+    const size    = typeof result?.size    === 'number'  ? result.size    : 0;
     const logPath = result?.path || '';
 
     if (pathEl) pathEl.textContent = logPath;
@@ -4566,8 +4618,26 @@ async function loadDebugLog() {
       contentEl.textContent = content;
       contentEl.scrollTop = contentEl.scrollHeight;
       const lines = content.split('\n').filter(Boolean).length;
-      const kb = (size / 1024).toFixed(1);
-      if (meta) meta.textContent = `${lines} lines · ${kb} KB`;
+      if (meta) meta.textContent = `${lines} lines · ${fmtBytes(size)}`;
+    }
+
+    // Show archived log list (index > 0 = archives)
+    if (archivesEl) {
+      const arcs = Array.isArray(archives) ? archives.filter(a => a.index > 0) : [];
+      if (arcs.length === 0) {
+        archivesEl.classList.add('hidden');
+      } else {
+        archivesEl.classList.remove('hidden');
+        archivesEl.innerHTML = `<div class="debug-log-archives-title">Archived logs (${arcs.length})</div>` +
+          arcs.map(a => {
+            const age = Math.round((Date.now() - a.mtime) / 86400000);
+            return `<div class="debug-log-archive-entry">
+              <span class="archive-badge">.${a.index}</span>
+              <span class="archive-size">${fmtBytes(a.size)}</span>
+              <span class="archive-path" title="${escapeHtml(a.path)}">${age}d ago — ${escapeHtml(a.path.split('/').pop())}</span>
+            </div>`;
+          }).join('');
+      }
     }
   } catch (e) {
     contentEl.textContent = 'Error reading log: ' + e.message;

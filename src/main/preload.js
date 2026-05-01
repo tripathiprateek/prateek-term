@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   debugGetLog: () => ipcRenderer.invoke('debug:getLog'),
   debugClearLog: () => ipcRenderer.send('debug:clearLog'),
   debugOpenLogFolder: () => ipcRenderer.send('debug:openLogFolder'),
+  debugRotateLog: () => ipcRenderer.invoke('debug:rotateLog'),
+  debugListArchives: () => ipcRenderer.invoke('debug:listArchives'),
 
   // Cloudflare Access — find the cloudflared binary.
   // Pass an optional user-supplied path; returns { path, version } or null.

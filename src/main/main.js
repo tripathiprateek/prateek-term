@@ -177,21 +177,81 @@ function flushPendingFolderPaths() {
 }
 
 const DEBUG_LOG_PATH = path.join(app.getPath('userData'), 'debug.log');
-const DEBUG_LOG_MAX = 500 * 1024; // 500 KB — rotate when exceeded
+// ---------------------------------------------------------------------------
+// Debug log rotation
+//
+// Defaults (overridden by user settings):
+//   logRotateSizeMB  50   — rotate when file exceeds this many MB
+//   logRotateAgeDays 30   — rotate when file is older than this many days
+//   logRotateMaxFiles 5   — keep this many numbered archives
+//
+// Archive naming: debug.log.1 (newest) … debug.log.N (oldest)
+// ---------------------------------------------------------------------------
+
+const LOG_ROTATE_DEFAULTS = {
+  logRotateSizeMB:   50,
+  logRotateAgeDays:  30,
+  logRotateMaxFiles: 5,
+};
+
+/**
+ * Shift existing archives up by one index, removing the oldest if maxFiles is
+ * reached, then rename the current log to .1.
+ */
+function rotateDebugLog() {
+  try {
+    if (!fs.existsSync(DEBUG_LOG_PATH)) return;
+    const s = loadSettings();
+    const maxFiles = Math.max(1, parseInt(s.logRotateMaxFiles ?? LOG_ROTATE_DEFAULTS.logRotateMaxFiles, 10));
+
+    // Shift: debug.log.N-1 → debug.log.N … debug.log.1 → debug.log.2
+    for (let i = maxFiles - 1; i >= 1; i--) {
+      const from = `${DEBUG_LOG_PATH}.${i}`;
+      const to   = `${DEBUG_LOG_PATH}.${i + 1}`;
+      if (fs.existsSync(from)) {
+        if (i + 1 > maxFiles) {
+          fs.unlinkSync(from); // drop oldest beyond limit
+        } else {
+          fs.renameSync(from, to);
+        }
+      }
+    }
+    // Current log → .1
+    fs.renameSync(DEBUG_LOG_PATH, `${DEBUG_LOG_PATH}.1`);
+  } catch { /* rotation errors are non-fatal */ }
+}
+
+/**
+ * Check rotation triggers — call on every dbgLog write and on app start.
+ * Returns true if rotation was performed.
+ */
+function maybeRotateDebugLog() {
+  try {
+    if (!fs.existsSync(DEBUG_LOG_PATH)) return false;
+    const s    = loadSettings();
+    const sizeMB  = parseFloat(s.logRotateSizeMB  ?? LOG_ROTATE_DEFAULTS.logRotateSizeMB);
+    const ageDays = parseFloat(s.logRotateAgeDays ?? LOG_ROTATE_DEFAULTS.logRotateAgeDays);
+
+    const stat = fs.statSync(DEBUG_LOG_PATH);
+
+    const sizeTriggered = sizeMB  > 0 && stat.size >= sizeMB * 1024 * 1024;
+    const ageMs         = ageDays > 0 ? ageDays * 24 * 60 * 60 * 1000 : Infinity;
+    const ageTriggered  = ageDays > 0 && (Date.now() - stat.mtimeMs) >= ageMs;
+
+    if (sizeTriggered || ageTriggered) {
+      rotateDebugLog();
+      return true;
+    }
+  } catch {}
+  return false;
+}
 
 function dbgLog(msg) {
   try {
     const settings = loadSettings();
     if (!settings.debugLogging) return;
+    maybeRotateDebugLog();
     const line = `${new Date().toISOString()} ${msg}\n`;
-    // Rotate log if too large
-    try {
-      if (fs.existsSync(DEBUG_LOG_PATH) && fs.statSync(DEBUG_LOG_PATH).size > DEBUG_LOG_MAX) {
-        const content = fs.readFileSync(DEBUG_LOG_PATH, 'utf8');
-        const half = content.slice(Math.floor(content.length / 2));
-        fs.writeFileSync(DEBUG_LOG_PATH, '--- log rotated ---\n' + half, 'utf8');
-      }
-    } catch {}
     fs.appendFileSync(DEBUG_LOG_PATH, line);
   } catch {}
 }
@@ -404,6 +464,8 @@ app.whenReady().then(() => {
   }
 
   const { version, buildNum, channel } = getVersionInfo();
+  // Run rotation check at startup (catches age-based trigger even if app was idle)
+  maybeRotateDebugLog();
   // Startup banner — logged once so support logs are self-describing
   dbgLog(`=== Prateek-Term ${version} (build ${buildNum}) starting ===`);
   dbgLog(`platform=${process.platform} arch=${process.arch} node=${process.version} electron=${process.versions.electron}`);
@@ -1016,6 +1078,29 @@ ipcMain.on('debug:openLogFolder', () => {
     try { fs.writeFileSync(DEBUG_LOG_PATH, ''); } catch {}
   }
   shell.showItemInFolder(DEBUG_LOG_PATH);
+});
+
+ipcMain.handle('debug:rotateLog', () => {
+  rotateDebugLog();
+  dbgLog('[log] manual rotation triggered');
+  return { ok: true };
+});
+
+/** Return metadata for the current log + all numbered archives. */
+ipcMain.handle('debug:listArchives', () => {
+  const s = loadSettings();
+  const maxFiles = Math.max(1, parseInt(s.logRotateMaxFiles ?? LOG_ROTATE_DEFAULTS.logRotateMaxFiles, 10));
+  const entries = [];
+  for (let i = 0; i <= maxFiles; i++) {
+    const p = i === 0 ? DEBUG_LOG_PATH : `${DEBUG_LOG_PATH}.${i}`;
+    if (fs.existsSync(p)) {
+      try {
+        const stat = fs.statSync(p);
+        entries.push({ index: i, path: p, size: stat.size, mtime: stat.mtimeMs });
+      } catch {}
+    }
+  }
+  return entries;
 });
 
 // ---------- SSH Config Import / Export ----------
