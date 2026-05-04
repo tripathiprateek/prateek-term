@@ -1838,7 +1838,9 @@ function buildSessionData() {
 // POSIX shell quote: wraps in single quotes, escapes embedded single quotes.
 // Safe for any filesystem path (spaces, `$`, `"`, `;`, etc.).
 function shellQuote(s) {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+  // Wrap in single quotes; escape embedded single quotes as '\''
+  const escaped = String(s).split('\'').join('\'\\\'\'');
+  return '\'' + escaped + '\'';
 }
 
 // Inject the OSC 7 cwd reporter into an SSH tab's shell.
@@ -1883,21 +1885,24 @@ function fireOscInjection(tab) {
   tab._oscDebounceTimer = null;
 
   // Phase 1: disable echo (leading space → history skip)
-  window.terminalAPI.sendInput(tab.ptyId, ` stty -echo 2>/dev/null\r`);
+  window.terminalAPI.sendInput(tab.ptyId, ' stty -echo 2>/dev/null\r');
 
   // Phase 2: setup (leading space → history skip; invisible because echo off)
+  // NOTE: double-quotes inside the JS single-quoted strings are shell double-quotes
+  // (variable expansion). Single-quotes inside are escaped as \' for JS.
+  // \\033 and \\\\ are JS escape sequences that produce the shell literals \033 and \\.
   setTimeout(() => {
     if (!tab.ptyId) return;
     const setup =
-      ` _pt_cwd(){ printf '\\033]7;file://%s%s\\033\\\\' ` +
-      `"\${HOSTNAME:-$(hostname 2>/dev/null)}" "$PWD"; };` +
-      `cd(){ command cd "$@" && _pt_cwd; };` +
-      `_pt_cwd;` +
-      `export PROMPT_COMMAND="_pt_cwd; \${PROMPT_COMMAND:-:}";` +
-      `stty echo 2>/dev/null;` +
+      ' _pt_cwd(){ printf \'\\033]7;file://%s%s\\033\\\\\' ' +
+      '"${HOSTNAME:-$(hostname 2>/dev/null)}" "$PWD"; };' +
+      'cd(){ command cd "$@" && _pt_cwd; };' +
+      '_pt_cwd;' +
+      'export PROMPT_COMMAND="_pt_cwd; ${PROMPT_COMMAND:-:}";' +
+      'stty echo 2>/dev/null;' +
       // Erase the visible `stty -echo` line and redraw prompt on that row
-      `printf '\\033[2F\\033[0J'` +
-      `\r`;
+      'printf \'\\033[2F\\033[0J\'' +
+      '\r';
     window.terminalAPI.sendInput(tab.ptyId, setup);
   }, 300);
 }

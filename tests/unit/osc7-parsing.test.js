@@ -106,7 +106,8 @@ describe('app.js — cwd reporter auto-inject for SSH tabs', () => {
 
   test('_pt_cwd function emits OSC 7 escape with PWD', () => {
     // The injected command writes ESC ] 7 ; file://$HOSTNAME$PWD ESC \
-    expect(appSource).toMatch(/printf\s+'\\\\033\]7;file:\/\/%s%s\\\\033\\\\\\\\'/);
+    // Accept either bare ' (backtick JS string) or \' (escaped in single-quoted JS string)
+    expect(appSource).toMatch(/printf\s+\\'?\\\\033\]7;file:\/\/%s%s\\\\033/);
   });
 
   test('overrides cd() to work on busybox ash/dropbear (not bash-only)', () => {
@@ -205,13 +206,15 @@ describe('app.js — injection is hidden from terminal + history', () => {
   });
 
   test('leading space before stty -echo so bash/zsh ignorespace skips history', () => {
-    // ` stty -echo` (leading space) → HISTCONTROL=ignorespace / HIST_IGNORE_SPACE
-    expect(appSource).toMatch(/`\s+stty -echo 2>\/dev\/null/);
+    // ` stty -echo` or ' stty -echo` (leading space) → HISTCONTROL=ignorespace / HIST_IGNORE_SPACE
+    // Accept either backtick or single-quote JS string delimiter
+    expect(appSource).toMatch(/['`]\s+stty -echo 2>\/dev\/null/);
   });
 
   test('phase-2 setup ALSO has leading space for history skip', () => {
     // Phase 2 previously started with `_pt_cwd(){...` — no leading space, so it
     // landed in history even when echo was suppressed. Must start with a space.
-    expect(appSource).toMatch(/` _pt_cwd\(\)\{ printf/);
+    // Accept either backtick or single-quote JS string delimiter
+    expect(appSource).toMatch(/['`] _pt_cwd\(\)\{ printf/);
   });
 });
