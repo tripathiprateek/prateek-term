@@ -3212,8 +3212,24 @@ function renderFormTags() {
       const idx = parseInt(btn.dataset.index);
       state.currentTags.splice(idx, 1);
       renderFormTags();
+      // Auto-persist tag removal for existing profiles so changes are
+      // immediately visible to the MCP bridge without a Save click.
+      persistTagsIfEditing();
     });
   });
+}
+
+// Immediately persist state.currentTags back into state.profiles and save to
+// disk — but ONLY when editing an existing profile (editingProfileId is set).
+// This makes tag changes (add / remove) immediately visible to the MCP bridge
+// without requiring the user to also click the Save Profile button.
+function persistTagsIfEditing() {
+  if (!state.editingProfileId) return;
+  const index = state.profiles.findIndex((p) => p.id === state.editingProfileId);
+  if (index === -1) return;
+  // Patch only the tags field; leave everything else untouched.
+  state.profiles[index] = { ...state.profiles[index], tags: [...state.currentTags] };
+  saveAllProfiles();
 }
 
 function addTag() {
@@ -3233,6 +3249,9 @@ function addTag() {
   dom.connTagInput.value = '';
   hideTagSuggestions();
   renderFormTags();
+  // Auto-persist tag addition for existing profiles so the MCP bridge sees
+  // the new tag immediately — no Save Profile click required.
+  persistTagsIfEditing();
 }
 
 function hideTagSuggestions() {
