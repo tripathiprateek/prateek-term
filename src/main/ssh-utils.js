@@ -218,7 +218,9 @@ function buildCommonSSHFlags(profile) {
   }
 
   if (profile.pemFile) {
-    flags.push('-i', profile.pemFile);
+    // Expand leading ~ so manually-typed paths like ~/.ssh/id_rsa work correctly.
+    const resolvedPem = String(profile.pemFile).replace(/^~(?=$|\/|\\)/, process.env.HOME || '~');
+    flags.push('-i', resolvedPem);
     // IdentitiesOnly=yes forces SSH to ONLY use the specified key file —
     // skip ssh-agent lookup entirely. Prevents auth failures when the MCP
     // server process (spawned by Claude.app) has no SSH_AUTH_SOCK.
