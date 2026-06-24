@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prateek-Term — Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  header {
+    padding: 18px 32px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; color: #f0f6fc; }
+  header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: #21262d; border: 1px solid #30363d; color: #8b949e; }
+
+  .tab-bar { display: flex; gap: 8px; padding: 16px 32px 0; flex-wrap: wrap; }
+  .tab {
+    padding: 8px 16px; border-radius: 6px 6px 0 0; font-size: 13px;
+    cursor: pointer; border: 1px solid transparent; border-bottom: none;
+    color: #8b949e; background: transparent; transition: all 0.2s;
+  }
+  .tab:hover { color: #e6edf3; background: #21262d; }
+  .tab.active { color: #f0f6fc; background: #161b22; border-color: #30363d; }
+  .tab .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+  .info-panel {
+    margin: 0 32px 0;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 0 8px 8px 8px;
+    padding: 16px 20px;
+    min-height: 60px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #8b949e;
+    transition: all 0.2s;
+  }
+  .info-panel.startup { border-color: #58a6ff44; }
+  .info-panel.ssh     { border-color: #3fb95044; }
+  .info-panel.io      { border-color: #f7816644; }
+  .info-panel.session { border-color: #d2a8ff44; }
+  .info-panel.scp     { border-color: #ffa65744; }
+  .info-panel strong  { color: #f0f6fc; }
+  .info-panel code    { background: #21262d; padding: 1px 5px; border-radius: 3px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: #e6edf3; }
+  .info-panel .step   { display: inline-block; width: 20px; height: 20px; border-radius: 50%;
+                         text-align: center; line-height: 20px; font-size: 11px; font-weight: 700;
+                         margin-right: 4px; }
+  .info-panel .step.s { background: #1f3a5f; color: #58a6ff; }
+  .info-panel .step.g { background: #1a3a22; color: #3fb950; }
+  .info-panel .step.r { background: #3a1a1a; color: #f78166; }
+  .info-panel .step.p { background: #2d1a4a; color: #d2a8ff; }
+  .info-panel .step.o { background: #3a2a10; color: #ffa657; }
+
+  .canvas-wrap { padding: 16px 32px 16px; overflow-x: auto; }
+  svg { display: block; }
+
+  .flow-path {
+    fill: none;
+    stroke-width: 2;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .flow-path.visible { opacity: 1; }
+  .flow-path.dash { stroke-dasharray: 6 4; }
+
+  .flow-startup { stroke: #58a6ff; }
+  .flow-ssh     { stroke: #3fb950; }
+  .flow-io      { stroke: #f78166; }
+  .flow-session { stroke: #d2a8ff; }
+  .flow-scp     { stroke: #ffa657; }
+
+  .arrow-startup { fill: #58a6ff; }
+  .arrow-ssh     { fill: #3fb950; }
+  .arrow-io      { fill: #f78166; }
+  .arrow-session { fill: #d2a8ff; }
+  .arrow-scp     { fill: #ffa657; }
+
+  .step-label {
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .step-label.visible { opacity: 1; }
+
+  .comp-title { font-size: 12px; font-weight: 600; fill: #f0f6fc; }
+  .comp-sub   { font-size: 10px; fill: #8b949e; }
+  .comp-tag   { font-size: 9px;  fill: #58a6ff; }
+  .zone-label { font-size: 13px; font-weight: 700; fill: #8b949e; letter-spacing: 1px; }
+  .zone-sub   { font-size: 10px; fill: #6e7681; }
+
+  /* Data Stores panel */
+  #stores-panel { display:none; padding: 0 32px 32px; }
+  .stores-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+  .store-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+  .store-card-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #30363d; }
+  .store-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  .store-card-header h3 { font-size: 13px; font-weight: 600; color: #f0f6fc; }
+  .store-card-header .store-path { font-size: 11px; color: #8b949e; font-family: monospace; margin-top: 2px; }
+  .store-body { padding: 12px 16px; }
+  .store-row { display: flex; gap: 8px; margin-bottom: 10px; font-size: 12px; line-height: 1.5; }
+  .store-row:last-child { margin-bottom: 0; }
+  .store-label { width: 52px; flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; text-align: center; height: fit-content; margin-top: 1px; }
+  .lbl-what  { background: #21262d; color: #8b949e; }
+  .lbl-write { background: #1a3a22; color: #3fb950; }
+  .lbl-read  { background: #1f3a5f; color: #58a6ff; }
+  .lbl-when  { background: #2d1a1a; color: #f78166; }
+  .lbl-fmt   { background: #2d2420; color: #ffa657; }
+  .store-row-text { color: #c9d1d9; }
+  .store-row-text code { background: #21262d; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 11px; color: #e6edf3; }
+  .store-row-text strong { color: #f0f6fc; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <rect x="2" y="4" width="20" height="16" rx="3" stroke="#58a6ff" stroke-width="2"/>
+    <path d="M7 9l3 3-3 3M13 15h4" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <h1>Prateek-Term — Architecture</h1>
+  <span class="badge">Electron</span>
+  <span class="badge">xterm.js · node-pty · SSH · SCP · MCP</span>
+</header>
+
+<div class="tab-bar">
+  <button class="tab" onclick="setFlow('startup')"><span class="dot" style="background:#58a6ff"></span>Local Shell Startup</button>
+  <button class="tab" onclick="setFlow('ssh')"><span class="dot" style="background:#3fb950"></span>SSH Connection</button>
+  <button class="tab" onclick="setFlow('io')"><span class="dot" style="background:#f78166"></span>I/O Data Flow</button>
+  <button class="tab" onclick="setFlow('session')"><span class="dot" style="background:#d2a8ff"></span>Session Restore</button>
+  <button class="tab" onclick="setFlow('scp')"><span class="dot" style="background:#ffa657"></span>SCP Drag-Drop</button>
+  <button class="tab" onclick="setFlow('stores')"><span class="dot" style="background:#8b949e"></span>Data Stores</button>
+  <button class="tab active" onclick="setFlow(null)"><span class="dot" style="background:#8b949e"></span>Overview</button>
+</div>
+
+<div class="info-panel" id="info-panel">
+  Click a flow tab above to highlight paths through the system. <strong>Overview</strong> shows all components without arrows.
+</div>
+
+<div id="stores-panel">
+  <div class="stores-grid">
+
+    <div class="store-card" style="border-color:#d2a8ff44;">
+      <div class="store-card-header">
+        <div class="store-icon" style="background:#2d1a4a;">💾</div>
+        <div><h3>localStorage — Session Store</h3><div class="store-path">window.localStorage · browser-side</div></div>
+      </div>
+      <div class="store-body">
+        <div class="store-row"><span class="store-label lbl-what">WHAT</span><span class="store-row-text">Serialized tab state: title, protocol, cwd, sshProfile, remoteUrl. Keyed per session.</span></div>
+        <div class="store-row"><span class="store-label lbl-fmt">FORMAT</span><span class="store-row-text">JSON string. Written by <code>buildSessionData()</code>, read by <code>restoreSession()</code> on next launch.</span></div>
+        <div class="store-row"><span class="store-label lbl-write">WRITE</span><span class="store-row-text"><strong>buildSessionData()</strong> on app close / tab close events in renderer.</span></div>
+        <div class="store-row"><span class="store-label lbl-read">READ</span><span class="store-row-text"><strong>restoreSession()</strong> on app launch. Drives tab recreation with saved cwd.</span></div>
+        <div class="store-row"><span class="store-label lbl-when">WHEN</span><span class="store-row-text">Written on close, read on open. Persists across reboots. Cleared on explicit session reset.</span></div>
+      </div>
+    </div>
+
+    <div class="store-card" style="border-color:#f7816644;">
+      <div class="store-card-header">
+        <div class="store-icon" style="background:#3a1a1a;">📋</div>
+        <div><h3>debug.log + Archives</h3><div class="store-path">userData/logs/debug.log · debug.log.1 … .5</div></div>
+      </div>
+      <div class="store-body">
+        <div class="store-row"><span class="store-label lbl-what">WHAT</span><span class="store-row-text">Application debug log. Numbered rolling archives: <code>debug.log</code> → <code>debug.log.1</code> → <code>debug.log.2</code> … up to <code>.5</code>.</span></div>
+        <div class="store-row"><span class="store-label lbl-fmt">FORMAT</span><span class="store-row-text">Plain text. Timestamped lines. Rotation trigger: 50 MB size or 30 days age (both configurable).</span></div>
+        <div class="store-row"><span class="store-label lbl-write">WRITE</span><span class="store-row-text"><strong>main.js</strong> continuous append. <strong>maybeRotateDebugLog()</strong> shifts archives and starts fresh file.</span></div>
+        <div class="store-row"><span class="store-label lbl-read">READ</span><span class="store-row-text"><strong>Debug Log Viewer</strong> in renderer: current log + archive list. "Rotate Now" button triggers immediate rotation.</span></div>
+        <div class="store-row"><span class="store-label lbl-when">WHEN</span><span class="store-row-text">Written continuously while app runs. Rotation checked on each write. Archives shifted on trigger.</span></div>
+      </div>
+    </div>
+
+    <div class="store-card" style="border-color:#3fb95044;">
+      <div class="store-card-header">
+        <div class="store-icon" style="background:#1a3a22;">⚙️</div>
+        <div><h3>SSH Profiles — settings.json</h3><div class="store-path">userData/settings.json · Electron userData</div></div>
+      </div>
+      <div class="store-body">
+        <div class="store-row"><span class="store-label lbl-what">WHAT</span><span class="store-row-text">SSH profiles: host, port, user, identityFile, remotePath, cloudflareAccess flag, themes, keybindings, log rotation settings.</span></div>
+        <div class="store-row"><span class="store-label lbl-fmt">FORMAT</span><span class="store-row-text">JSON. Sections: <code>profiles[]</code>, <code>theme</code>, <code>keybindings</code>, <code>logRotation</code> (sizeMB, ageDays, maxFiles).</span></div>
+        <div class="store-row"><span class="store-label lbl-write">WRITE</span><span class="store-row-text"><strong>Settings UI</strong> in renderer via IPC → main. User edits themes, key bindings, profile details.</span></div>
+        <div class="store-row"><span class="store-label lbl-read">READ</span><span class="store-row-text"><strong>ssh-utils.js</strong> on SSH connect. <strong>SCP handler</strong> for remotePath. <strong>Settings UI</strong> to populate forms.</span></div>
+        <div class="store-row"><span class="store-label lbl-when">WHEN</span><span class="store-row-text">Read on every SSH connect and SCP upload. Written on every settings save. Persists across launches.</span></div>
+      </div>
+    </div>
+
+    <div class="store-card" style="border-color:#58a6ff44;">
+      <div class="store-card-header">
+        <div class="store-icon" style="background:#1f3a5f;">🔧</div>
+        <div><h3>node-pty State</h3><div class="store-path">In-memory · main process · per-tab</div></div>
+      </div>
+      <div class="store-body">
+        <div class="store-row"><span class="store-label lbl-what">WHAT</span><span class="store-row-text">PTY handles keyed by <code>ptyId</code>. Each holds: pty object, shell PID, cwd, dimensions (cols × rows).</span></div>
+        <div class="store-row"><span class="store-label lbl-fmt">FORMAT</span><span class="store-row-text">In-memory Map. Not persisted — re-created on session restore via <code>createTab</code> with saved cwd from localStorage.</span></div>
+        <div class="store-row"><span class="store-label lbl-write">WRITE</span><span class="store-row-text"><strong>pty:create IPC handler</strong> spawns new PTY, adds to map. <strong>pty:resize</strong> updates dimensions.</span></div>
+        <div class="store-row"><span class="store-label lbl-read">READ</span><span class="store-row-text"><strong>pty:write</strong> looks up by ptyId to write data. <strong>pty:close</strong> kills process and removes entry.</span></div>
+        <div class="store-row"><span class="store-label lbl-when">WHEN</span><span class="store-row-text">Exists only while app is running. One entry per open terminal tab. Gone on app exit.</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="canvas-wrap" id="svg-wrap">
+<svg id="diagram" width="1200" height="740" viewBox="0 0 1200 740">
+<defs>
+  <!-- Arrow markers -->
+  <marker id="arr-startup" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" class="arrow-startup"/>
+  </marker>
+  <marker id="arr-ssh" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" class="arrow-ssh"/>
+  </marker>
+  <marker id="arr-io" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" class="arrow-io"/>
+  </marker>
+  <marker id="arr-session" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" class="arrow-session"/>
+  </marker>
+  <marker id="arr-scp" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+    <path d="M0,0 L0,6 L8,3 z" class="arrow-scp"/>
+  </marker>
+
+  <!-- Zone gradients -->
+  <linearGradient id="grad-renderer" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#1c2333"/>
+    <stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <linearGradient id="grad-main" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#1e2430"/>
+    <stop offset="100%" stop-color="#161b22"/>
+  </linearGradient>
+  <linearGradient id="grad-external" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#1a1f2e"/>
+    <stop offset="100%" stop-color="#13171f"/>
+  </linearGradient>
+</defs>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ZONE 1: Renderer Process (left) -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<rect x="12" y="12" width="368" height="716" rx="10" fill="url(#grad-renderer)" stroke="#388bfd" stroke-width="1.5"/>
+<text x="28" y="36" class="zone-label">RENDERER PROCESS</text>
+<text x="28" y="50" class="zone-sub">src/renderer/ · Chromium BrowserWindow · xterm.js 5.x</text>
+
+<!-- Tab Bar component -->
+<rect x="28" y="60" width="336" height="86" rx="6" fill="#1c2128" stroke="#388bfd55"/>
+<text x="196" y="80" class="comp-title" text-anchor="middle">Tab Bar</text>
+<text x="196" y="94" class="comp-sub" text-anchor="middle">createTab() · tab context-menu</text>
+<text x="196" y="107" class="comp-sub" text-anchor="middle">close / close-left / close-right / close-all</text>
+<text x="196" y="120" class="comp-sub" text-anchor="middle">tab groups · drag-reorder</text>
+<text x="196" y="132" class="comp-tag" text-anchor="middle">app.js · TabManager</text>
+
+<!-- xterm.js component -->
+<rect x="28" y="158" width="336" height="96" rx="6" fill="#1c2128" stroke="#388bfd55"/>
+<text x="196" y="178" class="comp-title" text-anchor="middle">xterm.js</text>
+<text x="196" y="192" class="comp-sub" text-anchor="middle">Terminal emulator · WebGL renderer</text>
+<text x="196" y="205" class="comp-sub" text-anchor="middle">parser.registerOscHandler(7)</text>
+<text x="196" y="218" class="comp-sub" text-anchor="middle">stores tab._remoteCwd from OSC 7 URL</text>
+<text x="196" y="231" class="comp-sub" text-anchor="middle">onData → sendInput · term.write(data)</text>
+<text x="196" y="243" class="comp-tag" text-anchor="middle">xterm · xterm-addon-fit · xterm-addon-webgl</text>
+
+<!-- Session Manager component -->
+<rect x="28" y="266" width="336" height="80" rx="6" fill="#1c2128" stroke="#d2a8ff55"/>
+<text x="196" y="286" class="comp-title" text-anchor="middle">Session Manager</text>
+<text x="196" y="300" class="comp-sub" text-anchor="middle">buildSessionData() → localStorage</text>
+<text x="196" y="313" class="comp-sub" text-anchor="middle">restoreSession() → createTab({cwd})</text>
+<text x="196" y="326" class="comp-sub" text-anchor="middle">scheduleCwdRestore() for SSH tabs</text>
+<text x="196" y="337" class="comp-tag" text-anchor="middle">app.js · localStorage key: term-session</text>
+
+<!-- Drag-Drop SCP component -->
+<rect x="28" y="358" width="336" height="80" rx="6" fill="#1c2128" stroke="#ffa65755"/>
+<text x="196" y="378" class="comp-title" text-anchor="middle">Drag-Drop SCP</text>
+<text x="196" y="392" class="comp-sub" text-anchor="middle">dragover + drop on xterm container</text>
+<text x="196" y="405" class="comp-sub" text-anchor="middle">dest priority: tab._remoteCwd</text>
+<text x="196" y="418" class="comp-sub" text-anchor="middle">→ profile.remotePath → ~/</text>
+<text x="196" y="429" class="comp-tag" text-anchor="middle">app.js · buildCommonSSHFlags()</text>
+
+<!-- Settings UI component -->
+<rect x="28" y="450" width="160" height="90" rx="6" fill="#1c2128" stroke="#3fb95044"/>
+<text x="108" y="470" class="comp-title" text-anchor="middle">Settings UI</text>
+<text x="108" y="484" class="comp-sub" text-anchor="middle">Themes · key bindings</text>
+<text x="108" y="497" class="comp-sub" text-anchor="middle">Log rotation config</text>
+<text x="108" y="510" class="comp-sub" text-anchor="middle">size MB / age days</text>
+<text x="108" y="523" class="comp-sub" text-anchor="middle">max files</text>
+<text x="108" y="532" class="comp-tag" text-anchor="middle">settings.json</text>
+
+<!-- Debug Log Viewer -->
+<rect x="204" y="450" width="160" height="90" rx="6" fill="#1c2128" stroke="#f7816644"/>
+<text x="284" y="470" class="comp-title" text-anchor="middle">Debug Log Viewer</text>
+<text x="284" y="484" class="comp-sub" text-anchor="middle">Current log contents</text>
+<text x="284" y="497" class="comp-sub" text-anchor="middle">Archive list (.1 … .5)</text>
+<text x="284" y="510" class="comp-sub" text-anchor="middle">"Rotate Now" button</text>
+<text x="284" y="523" class="comp-sub" text-anchor="middle">debug:* IPC handlers</text>
+<text x="284" y="532" class="comp-tag" text-anchor="middle">debug.log viewer</text>
+
+<!-- Preload bridge note -->
+<rect x="28" y="556" width="336" height="60" rx="6" fill="#21262d" stroke="#30363d" stroke-dasharray="4 3"/>
+<text x="196" y="576" class="comp-title" text-anchor="middle" fill="#8b949e">Preload Bridge</text>
+<text x="196" y="590" class="comp-sub" text-anchor="middle">contextBridge.exposeInMainWorld('terminalAPI', {...})</text>
+<text x="196" y="603" class="comp-sub" text-anchor="middle">Only IPC surface — isolates renderer from Node.js</text>
+<text x="196" y="612" class="comp-tag" text-anchor="middle">preload.js</text>
+
+<!-- Renderer legend -->
+<rect x="28" y="628" width="336" height="86" rx="6" fill="#21262d" stroke="#30363d"/>
+<text x="196" y="648" class="comp-sub" text-anchor="middle" font-weight="600" fill="#c9d1d9">Key IPC Channels (renderer → main)</text>
+<text x="196" y="663" class="comp-tag" text-anchor="middle">pty:create · pty:write · pty:resize · pty:close</text>
+<text x="196" y="676" class="comp-tag" text-anchor="middle">ssh:connect · scp:upload · debug:read · debug:rotate</text>
+<text x="196" y="689" class="comp-tag" text-anchor="middle">cloudflared:find · settings:get · settings:set</text>
+<text x="196" y="702" class="comp-tag" text-anchor="middle">↓ Events main → renderer: pty:data · folder:open</text>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ZONE 2: Main Process (middle) -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<rect x="400" y="12" width="392" height="716" rx="10" fill="url(#grad-main)" stroke="#3fb950" stroke-width="1.5"/>
+<text x="416" y="36" class="zone-label">MAIN PROCESS</text>
+<text x="416" y="50" class="zone-sub">src/main/ · Node.js · Electron main · main.js</text>
+
+<!-- IPC Handlers -->
+<rect x="416" y="60" width="360" height="86" rx="6" fill="#1c2128" stroke="#3fb95055"/>
+<text x="596" y="80" class="comp-title" text-anchor="middle">IPC Handlers</text>
+<text x="596" y="94" class="comp-sub" text-anchor="middle">ipcMain.handle('pty:create') → spawn node-pty</text>
+<text x="596" y="107" class="comp-sub" text-anchor="middle">ipcMain.handle('ssh:connect') → buildSSHCommand</text>
+<text x="596" y="120" class="comp-sub" text-anchor="middle">ipcMain.handle('scp:upload') → SCP handler</text>
+<text x="596" y="132" class="comp-tag" text-anchor="middle">main.js · all handlers in one file</text>
+
+<!-- node-pty -->
+<rect x="416" y="158" width="168" height="80" rx="6" fill="#1c2128" stroke="#58a6ff55"/>
+<text x="500" y="178" class="comp-title" text-anchor="middle">node-pty</text>
+<text x="500" y="192" class="comp-sub" text-anchor="middle">Spawns local shell</text>
+<text x="500" y="205" class="comp-sub" text-anchor="middle">cwd option from opts</text>
+<text x="500" y="218" class="comp-sub" text-anchor="middle">pty.write() · pty.resize()</text>
+<text x="500" y="229" class="comp-tag" text-anchor="middle">node-pty npm · PTY master fd</text>
+
+<!-- SSH Command Builder -->
+<rect x="600" y="158" width="176" height="80" rx="6" fill="#1c2128" stroke="#3fb95055"/>
+<text x="688" y="178" class="comp-title" text-anchor="middle">SSH Command Builder</text>
+<text x="688" y="192" class="comp-sub" text-anchor="middle">ssh-utils.js</text>
+<text x="688" y="205" class="comp-sub" text-anchor="middle">buildSSHCommand(profile)</text>
+<text x="688" y="218" class="comp-sub" text-anchor="middle">buildCloudflareProxyFlags()</text>
+<text x="688" y="229" class="comp-tag" text-anchor="middle">findCloudflared() · wrapWithAskpass()</text>
+
+<!-- SCP Handler -->
+<rect x="416" y="250" width="168" height="76" rx="6" fill="#1c2128" stroke="#ffa65755"/>
+<text x="500" y="270" class="comp-title" text-anchor="middle">SCP Handler</text>
+<text x="500" y="284" class="comp-sub" text-anchor="middle">scp -i key -P port</text>
+<text x="500" y="297" class="comp-sub" text-anchor="middle">user@host:dest/file</text>
+<text x="500" y="310" class="comp-sub" text-anchor="middle">remotePath from IPC call</text>
+<text x="500" y="319" class="comp-tag" text-anchor="middle">buildCommonSSHFlags()</text>
+
+<!-- Log Rotation -->
+<rect x="600" y="250" width="176" height="76" rx="6" fill="#1c2128" stroke="#f7816644"/>
+<text x="688" y="270" class="comp-title" text-anchor="middle">Log Rotation</text>
+<text x="688" y="284" class="comp-sub" text-anchor="middle">maybeRotateDebugLog()</text>
+<text x="688" y="297" class="comp-sub" text-anchor="middle">size trigger: 50 MB default</text>
+<text x="688" y="310" class="comp-sub" text-anchor="middle">age trigger: 30 days default</text>
+<text x="688" y="319" class="comp-tag" text-anchor="middle">debug.log → .1 → .2 … .5</text>
+
+<!-- Native Addon -->
+<rect x="416" y="338" width="168" height="70" rx="6" fill="#1c2128" stroke="#8b949e44"/>
+<text x="500" y="358" class="comp-title" text-anchor="middle">Native Addon</text>
+<text x="500" y="372" class="comp-sub" text-anchor="middle">src/native/addon.mm</text>
+<text x="500" y="385" class="comp-sub" text-anchor="middle">macOS: App icons</text>
+<text x="500" y="398" class="comp-sub" text-anchor="middle">Dock integration</text>
+<text x="500" y="401" class="comp-tag" text-anchor="middle">Objective-C++ · node addon</text>
+
+<!-- HTTP Bridge -->
+<rect x="600" y="338" width="176" height="70" rx="6" fill="#1c2128" stroke="#8b949e55"/>
+<text x="688" y="358" class="comp-title" text-anchor="middle">HTTP Bridge</text>
+<text x="688" y="372" class="comp-sub" text-anchor="middle">http-bridge.js</text>
+<text x="688" y="385" class="comp-sub" text-anchor="middle">Local HTTP server</text>
+<text x="688" y="398" class="comp-sub" text-anchor="middle">MCP protocol → terminal</text>
+<text x="688" y="401" class="comp-tag" text-anchor="middle">localhost:port · sessions bridge</text>
+
+<!-- CWD Detection -->
+<rect x="416" y="420" width="360" height="70" rx="6" fill="#1c2128" stroke="#58a6ff33"/>
+<text x="596" y="440" class="comp-title" text-anchor="middle">CWD Detection</text>
+<text x="596" y="454" class="comp-sub" text-anchor="middle">checkCwd(): probes lsof / /proc/{pid}/cwd → updates tab._cwdPath + title</text>
+<text x="596" y="467" class="comp-sub" text-anchor="middle">maybeFireOscInjection(tab, data) — watches for first shell prompt</text>
+<text x="596" y="480" class="comp-sub" text-anchor="middle">fireOscInjection(tab) → stty -echo → _pt_cwd() + PROMPT_COMMAND setup</text>
+<text x="596" y="483" class="comp-tag" text-anchor="middle">main.js · onTerminalData()</text>
+
+<!-- OSC 7 injection info -->
+<rect x="416" y="502" width="360" height="56" rx="6" fill="#1c2128" stroke="#58a6ff22"/>
+<text x="596" y="522" class="comp-title" text-anchor="middle" fill="#8b949e">OSC 7 Injection (SSH)</text>
+<text x="596" y="536" class="comp-sub" text-anchor="middle">fireOscInjection sends POSIX _pt_cwd() shell function + PROMPT_COMMAND</text>
+<text x="596" y="549" class="comp-sub" text-anchor="middle">Shell emits OSC 7: file://hostname/path → renderer registerOscHandler(7)</text>
+<text x="596" y="552" class="comp-tag" text-anchor="middle">ssh OSC 7 bootstrap</text>
+
+<!-- App entry + window -->
+<rect x="416" y="570" width="360" height="56" rx="6" fill="#21262d" stroke="#30363d" stroke-dasharray="4 3"/>
+<text x="596" y="590" class="comp-title" text-anchor="middle" fill="#8b949e">App Lifecycle</text>
+<text x="596" y="604" class="comp-sub" text-anchor="middle">app.whenReady() → BrowserWindow → loadFile(index.html)</text>
+<text x="596" y="617" class="comp-sub" text-anchor="middle">rendererReady() IPC → deliver buffered folder open-paths</text>
+<text x="596" y="620" class="comp-tag" text-anchor="middle">main.js</text>
+
+<!-- Shell spawn params -->
+<rect x="416" y="638" width="360" height="76" rx="6" fill="#21262d" stroke="#30363d"/>
+<text x="596" y="658" class="comp-sub" text-anchor="middle" font-weight="600" fill="#c9d1d9">PTY Spawn Options</text>
+<text x="596" y="672" class="comp-tag" text-anchor="middle">shell: /bin/zsh | /bin/bash | fish</text>
+<text x="596" y="685" class="comp-tag" text-anchor="middle">cwd: from createTab opts (session restore or tab open)</text>
+<text x="596" y="698" class="comp-tag" text-anchor="middle">env: process.env + TERM=xterm-256color + COLORTERM=truecolor</text>
+<text x="596" y="706" class="comp-tag" text-anchor="middle">cols/rows: from xterm.js dimensions</text>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- ZONE 3: External (right, dashed border) -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<rect x="812" y="12" width="376" height="716" rx="10" fill="url(#grad-external)" stroke="#30363d" stroke-width="1.5" stroke-dasharray="7 4"/>
+<text x="828" y="36" class="zone-label">EXTERNAL</text>
+<text x="828" y="50" class="zone-sub">OS · Remote hosts · Cloud services · Storage</text>
+
+<!-- Local Shell -->
+<rect x="828" y="60" width="344" height="90" rx="6" fill="#1c2128" stroke="#58a6ff44"/>
+<text x="1000" y="80" class="comp-title" text-anchor="middle">Local Shell</text>
+<text x="1000" y="94" class="comp-sub" text-anchor="middle">zsh / bash / fish</text>
+<text x="1000" y="107" class="comp-sub" text-anchor="middle">Emits OSC 7 via PROMPT_COMMAND</text>
+<text x="1000" y="120" class="comp-sub" text-anchor="middle">OSC 7 URL: file://hostname/path</text>
+<text x="1000" y="133" class="comp-sub" text-anchor="middle">Reads/writes PTY master fd</text>
+<text x="1000" y="142" class="comp-tag" text-anchor="middle">macOS · /bin/zsh default</text>
+
+<!-- Remote SSH Server -->
+<rect x="828" y="162" width="344" height="90" rx="6" fill="#1c2128" stroke="#3fb95055"/>
+<text x="1000" y="182" class="comp-title" text-anchor="middle">Remote SSH Server</text>
+<text x="1000" y="196" class="comp-sub" text-anchor="middle">OpenSSH / dropbear</text>
+<text x="1000" y="209" class="comp-sub" text-anchor="middle">Accepts SCP uploads</text>
+<text x="1000" y="222" class="comp-sub" text-anchor="middle">Target of drag-drop file transfers</text>
+<text x="1000" y="235" class="comp-sub" text-anchor="middle">Returns shell prompt → OSC 7 injection</text>
+<text x="1000" y="244" class="comp-tag" text-anchor="middle">port 22 default · configurable per profile</text>
+
+<!-- Cloudflare Access -->
+<rect x="828" y="264" width="344" height="80" rx="6" fill="#1c2128" stroke="#ffa65744"/>
+<text x="1000" y="284" class="comp-title" text-anchor="middle">Cloudflare Access</text>
+<text x="1000" y="298" class="comp-sub" text-anchor="middle">cloudflared access ssh --hostname %h</text>
+<text x="1000" y="311" class="comp-sub" text-anchor="middle">ProxyCommand injected by buildCloudflareProxyFlags()</text>
+<text x="1000" y="324" class="comp-sub" text-anchor="middle">Binary auto-detected from candidate paths</text>
+<text x="1000" y="336" class="comp-tag" text-anchor="middle">findCloudflared() · ~/.cloudflared / /usr/local/bin</text>
+
+<!-- MCP Clients -->
+<rect x="828" y="356" width="344" height="76" rx="6" fill="#1c2128" stroke="#8b949e55"/>
+<text x="1000" y="376" class="comp-title" text-anchor="middle">MCP Clients</text>
+<text x="1000" y="390" class="comp-sub" text-anchor="middle">Claude Code or other MCP-compatible clients</text>
+<text x="1000" y="403" class="comp-sub" text-anchor="middle">Connect to HTTP Bridge on localhost</text>
+<text x="1000" y="416" class="comp-sub" text-anchor="middle">run_command · read_output · send_input</text>
+<text x="1000" y="424" class="comp-tag" text-anchor="middle">MCP protocol over HTTP · localhost:port</text>
+
+<!-- Serial Device -->
+<rect x="828" y="444" width="344" height="70" rx="6" fill="#1c2128" stroke="#8b949e44"/>
+<text x="1000" y="464" class="comp-title" text-anchor="middle">Serial Device</text>
+<text x="1000" y="478" class="comp-sub" text-anchor="middle">/dev/tty.* USB serial</text>
+<text x="1000" y="491" class="comp-sub" text-anchor="middle">accessed via serialport npm package</text>
+<text x="1000" y="504" class="comp-sub" text-anchor="middle">Baud rate, data bits configurable per profile</text>
+<text x="1000" y="506" class="comp-tag" text-anchor="middle">serialport · macOS /dev/tty.usbserial-*</text>
+
+<!-- localStorage external view -->
+<rect x="828" y="526" width="344" height="70" rx="6" fill="#1c2128" stroke="#d2a8ff44"/>
+<text x="1000" y="546" class="comp-title" text-anchor="middle">localStorage</text>
+<text x="1000" y="560" class="comp-sub" text-anchor="middle">Session persistence store</text>
+<text x="1000" y="573" class="comp-sub" text-anchor="middle">Tab titles · cwds · protocols · SSH profiles</text>
+<text x="1000" y="586" class="comp-sub" text-anchor="middle">Survives app restart · Chromium storage</text>
+<text x="1000" y="588" class="comp-tag" text-anchor="middle">window.localStorage · Electron userData partition</text>
+
+<!-- Temp key / askpass -->
+<rect x="828" y="608" width="344" height="106" rx="6" fill="#1c2128" stroke="#8b949e33"/>
+<text x="1000" y="628" class="comp-title" text-anchor="middle">Auth Helpers</text>
+<text x="1000" y="642" class="comp-sub" text-anchor="middle">wrapWithAskpass(): password auth via askpass helper</text>
+<text x="1000" y="655" class="comp-sub" text-anchor="middle">PEM temp key: re-written on each reconnect</text>
+<text x="1000" y="668" class="comp-sub" text-anchor="middle">SSH_ASKPASS env var → askpass binary path</text>
+<text x="1000" y="681" class="comp-sub" text-anchor="middle">Temp key written to userData/tmp/ · cleaned on close</text>
+<text x="1000" y="694" class="comp-sub" text-anchor="middle">identityFile from SSH profile → -i flag</text>
+<text x="1000" y="706" class="comp-tag" text-anchor="middle">ssh-utils.js · no plaintext key in memory</text>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- FLOW PATHS -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+<!-- ─── LOCAL SHELL STARTUP FLOW (blue) ─── -->
+<!-- 1: Tab Bar → createTab (within renderer) -->
+<path class="flow-path flow-startup" id="f-startup-1"
+      d="M196,146 L196,158" marker-end="url(#arr-startup)"/>
+<!-- 2: xterm → terminalAPI.createPty IPC (renderer to preload) -->
+<path class="flow-path flow-startup" id="f-startup-2"
+      d="M364,200 L400,200 L400,100 L416,100" marker-end="url(#arr-startup)"/>
+<!-- 3: IPC → node-pty spawn -->
+<path class="flow-path flow-startup" id="f-startup-3"
+      d="M596,146 L596,158 L500,158" marker-end="url(#arr-startup)"/>
+<!-- 4: node-pty → local shell (pty:data back) -->
+<path class="flow-path flow-startup" id="f-startup-4"
+      d="M500,238 L500,260 L812,260 L812,105 L828,105" marker-end="url(#arr-startup)"/>
+<!-- 5: pty:data → renderer (data back) -->
+<path class="flow-path flow-startup" id="f-startup-5"
+      d="M416,180 L390,180 L390,225 L364,225" marker-end="url(#arr-startup)"/>
+<!-- 6: checkCwd probes shell → tab title update -->
+<path class="flow-path flow-startup" id="f-startup-6"
+      d="M596,490 L596,510 L390,510 L390,196 L364,196" marker-end="url(#arr-startup)"/>
+<!-- 7: buildSessionData → localStorage -->
+<path class="flow-path flow-startup" id="f-startup-7"
+      d="M196,346 L196,380 L390,380 L390,560 L812,560" marker-end="url(#arr-startup)"/>
+
+<!-- ─── SSH CONNECTION FLOW (green) ─── -->
+<!-- 1: connectSSH in renderer → IPC ssh:connect -->
+<path class="flow-path flow-ssh" id="f-ssh-1"
+      d="M364,103 L400,103 L400,103 L416,103" marker-end="url(#arr-ssh)"/>
+<!-- 2: IPC → SSH Command Builder -->
+<path class="flow-path flow-ssh" id="f-ssh-2"
+      d="M596,146 L596,158 L688,158" marker-end="url(#arr-ssh)"/>
+<!-- 3: buildCloudflareProxyFlags → findCloudflared -->
+<path class="flow-path flow-ssh" id="f-ssh-3"
+      d="M776,198 L812,198 L812,304 L828,304" marker-end="url(#arr-ssh)"/>
+<!-- 4: node-pty spawns ssh with args -->
+<path class="flow-path flow-ssh" id="f-ssh-4"
+      d="M584,198 L500,198 L500,238" marker-end="url(#arr-ssh)"/>
+<!-- 5: ssh → Remote SSH Server -->
+<path class="flow-path flow-ssh" id="f-ssh-5"
+      d="M500,238 L500,260 L812,260 L812,207 L828,207" marker-end="url(#arr-ssh)"/>
+<!-- 6: maybeFireOscInjection → fireOscInjection -->
+<path class="flow-path flow-ssh" id="f-ssh-6"
+      d="M596,502 L596,510 L596,558" marker-end="url(#arr-ssh)"/>
+<!-- 7: OSC 7 from shell → xterm handler → tab._remoteCwd -->
+<path class="flow-path flow-ssh" id="f-ssh-7"
+      d="M828,202 L812,202 L812,420 L390,420 L390,210 L364,210" marker-end="url(#arr-ssh)"/>
+
+<!-- ─── I/O DATA FLOW (red) ─── -->
+<!-- 1: keystroke → xterm onData → sendInput IPC pty:write -->
+<path class="flow-path flow-io" id="f-io-1"
+      d="M364,215 L400,215 L400,72 L416,72" marker-end="url(#arr-io)"/>
+<!-- 2: pty.write → PTY master fd → shell stdin -->
+<path class="flow-path flow-io" id="f-io-2"
+      d="M500,158 L500,130 L812,130 L812,100 L828,100" marker-end="url(#arr-io)"/>
+<!-- 3: shell stdout → PTY master → pty:data → preload callback -->
+<path class="flow-path flow-io" id="f-io-3"
+      d="M828,95 L812,95 L812,180 L584,180" marker-end="url(#arr-io)"/>
+<!-- 4: preload delivers pty:data → renderer → xterm.write -->
+<path class="flow-path flow-io" id="f-io-4"
+      d="M416,185 L390,185 L390,220 L364,220" marker-end="url(#arr-io)"/>
+<!-- 5: maybeFireOscInjection + onTerminalData on every chunk -->
+<path class="flow-path flow-io" id="f-io-5"
+      d="M596,146 L596,140 L780,140 L780,455 L596,455 L596,490" marker-end="url(#arr-io)"/>
+
+<!-- ─── SESSION RESTORE FLOW (purple) ─── -->
+<!-- 1: buildSessionData → localStorage on close -->
+<path class="flow-path flow-session" id="f-session-1"
+      d="M196,346 L196,370 L390,370 L390,560 L812,560" marker-end="url(#arr-session)"/>
+<!-- 2: app launch → restoreSession reads localStorage -->
+<path class="flow-path flow-session" id="f-session-2"
+      d="M828,560 L390,560 L390,280 L364,280" marker-end="url(#arr-session)"/>
+<!-- 3: createTab with saved cwd for each tab -->
+<path class="flow-path flow-session" id="f-session-3"
+      d="M196,266 L196,146" marker-end="url(#arr-session)"/>
+<!-- 4: SSH tabs: scheduleCwdRestore sends cd <path> after connect -->
+<path class="flow-path flow-session" id="f-session-4"
+      d="M364,310 L400,310 L400,460 L416,460" marker-end="url(#arr-session)"/>
+<!-- 5: activateTab(lastActiveId) restores focus -->
+<path class="flow-path flow-session" id="f-session-5"
+      d="M364,78 L196,78 L196,60" marker-end="url(#arr-session)"/>
+<!-- 6: rendererReady → main delivers buffered open-folder paths -->
+<path class="flow-path flow-session" id="f-session-6"
+      d="M364,290 L390,290 L390,590 L596,590 L596,626" marker-end="url(#arr-session)"/>
+
+<!-- ─── SCP DRAG-DROP FLOW (orange) ─── -->
+<!-- 1: drag file → dragover + drop on xterm container -->
+<path class="flow-path flow-scp" id="f-scp-1"
+      d="M364,395 L390,395" marker-end="url(#arr-scp)"/>
+<!-- 2: resolve dest: tab._remoteCwd → profile.remotePath → ~/ -->
+<path class="flow-path flow-scp" id="f-scp-2"
+      d="M196,254 L196,358" marker-end="url(#arr-scp)"/>
+<!-- 3: IPC call scp:upload -->
+<path class="flow-path flow-scp" id="f-scp-3"
+      d="M364,400 L400,400 L400,280 L416,280" marker-end="url(#arr-scp)"/>
+<!-- 4: SCP handler builds scp command -->
+<path class="flow-path flow-scp" id="f-scp-4"
+      d="M596,250 L596,240 L500,240 L500,250" marker-end="url(#arr-scp)"/>
+<!-- 5: scp transfers file to Remote SSH Server -->
+<path class="flow-path flow-scp" id="f-scp-5"
+      d="M584,288 L812,288 L812,210 L828,210" marker-end="url(#arr-scp)"/>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- STEP NUMBER BUBBLES -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+
+<!-- Startup step bubbles -->
+<g id="steps-startup" class="step-label">
+  <circle cx="196" cy="152" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="196" y="156" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">1</text>
+  <circle cx="406" cy="180" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="406" y="184" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">2</text>
+  <circle cx="540" cy="158" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="540" y="162" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">3</text>
+  <circle cx="800" cy="240" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="800" y="244" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">4</text>
+  <circle cx="392" cy="210" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="392" y="214" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">5</text>
+  <circle cx="392" cy="460" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="392" y="464" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">6</text>
+  <circle cx="600" cy="558" r="9" fill="#1f3a5f" stroke="#58a6ff" stroke-width="1"/>
+  <text x="600" y="562" fill="#58a6ff" font-size="10" text-anchor="middle" font-weight="700">7</text>
+</g>
+
+<!-- SSH step bubbles -->
+<g id="steps-ssh" class="step-label">
+  <circle cx="406" cy="103" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="406" y="107" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">1</text>
+  <circle cx="640" cy="158" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="640" y="162" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">2</text>
+  <circle cx="812" cy="280" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="812" y="284" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">3</text>
+  <circle cx="536" cy="198" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="536" y="202" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">4</text>
+  <circle cx="800" cy="225" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="800" y="229" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">5</text>
+  <circle cx="596" cy="522" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="596" y="526" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">6</text>
+  <circle cx="392" cy="390" r="9" fill="#1a3a22" stroke="#3fb950" stroke-width="1"/>
+  <text x="392" y="394" fill="#3fb950" font-size="10" text-anchor="middle" font-weight="700">7</text>
+</g>
+
+<!-- I/O step bubbles -->
+<g id="steps-io" class="step-label">
+  <circle cx="390" cy="180" r="9" fill="#3a1a1a" stroke="#f78166" stroke-width="1"/>
+  <text x="390" y="184" fill="#f78166" font-size="10" text-anchor="middle" font-weight="700">1</text>
+  <circle cx="812" cy="116" r="9" fill="#3a1a1a" stroke="#f78166" stroke-width="1"/>
+  <text x="812" y="120" fill="#f78166" font-size="10" text-anchor="middle" font-weight="700">2</text>
+  <circle cx="620" cy="180" r="9" fill="#3a1a1a" stroke="#f78166" stroke-width="1"/>
+  <text x="620" y="184" fill="#f78166" font-size="10" text-anchor="middle" font-weight="700">3</text>
+  <circle cx="378" cy="208" r="9" fill="#3a1a1a" stroke="#f78166" stroke-width="1"/>
+  <text x="378" y="212" fill="#f78166" font-size="10" text-anchor="middle" font-weight="700">4</text>
+  <circle cx="780" cy="310" r="9" fill="#3a1a1a" stroke="#f78166" stroke-width="1"/>
+  <text x="780" y="314" fill="#f78166" font-size="10" text-anchor="middle" font-weight="700">5</text>
+</g>
+
+<!-- Session step bubbles -->
+<g id="steps-session" class="step-label">
+  <circle cx="600" cy="558" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="600" y="562" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">1</text>
+  <circle cx="392" cy="340" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="392" y="344" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">2</text>
+  <circle cx="196" cy="200" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="196" y="204" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">3</text>
+  <circle cx="406" cy="430" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="406" y="434" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">4</text>
+  <circle cx="100" cy="72" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="100" y="76" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">5</text>
+  <circle cx="596" cy="608" r="9" fill="#2d1a4a" stroke="#d2a8ff" stroke-width="1"/>
+  <text x="596" y="612" fill="#d2a8ff" font-size="10" text-anchor="middle" font-weight="700">6</text>
+</g>
+
+<!-- SCP step bubbles -->
+<g id="steps-scp" class="step-label">
+  <circle cx="378" cy="395" r="9" fill="#3a2a10" stroke="#ffa657" stroke-width="1"/>
+  <text x="378" y="399" fill="#ffa657" font-size="10" text-anchor="middle" font-weight="700">1</text>
+  <circle cx="196" cy="304" r="9" fill="#3a2a10" stroke="#ffa657" stroke-width="1"/>
+  <text x="196" y="308" fill="#ffa657" font-size="10" text-anchor="middle" font-weight="700">2</text>
+  <circle cx="406" cy="360" r="9" fill="#3a2a10" stroke="#ffa657" stroke-width="1"/>
+  <text x="406" y="364" fill="#ffa657" font-size="10" text-anchor="middle" font-weight="700">3</text>
+  <circle cx="540" cy="244" r="9" fill="#3a2a10" stroke="#ffa657" stroke-width="1"/>
+  <text x="540" y="248" fill="#ffa657" font-size="10" text-anchor="middle" font-weight="700">4</text>
+  <circle cx="800" cy="270" r="9" fill="#3a2a10" stroke="#ffa657" stroke-width="1"/>
+  <text x="800" y="274" fill="#ffa657" font-size="10" text-anchor="middle" font-weight="700">5</text>
+</g>
+
+</svg>
+</div>
+
+<script>
+const flows = {
+  startup: {
+    paths: ['f-startup-1','f-startup-2','f-startup-3','f-startup-4','f-startup-5','f-startup-6','f-startup-7'],
+    steps: 'steps-startup',
+    cls: 'startup',
+    info: `<strong>Local Shell Startup Flow</strong> — user clicks + to open a new local tab<br>
+      <span class="step s">1</span><strong>Tab Bar</strong>: <code>createTab({protocol:'local', cwd})</code> called in renderer — sets up new tab object<br>
+      <span class="step s">2</span><strong>xterm.js</strong>: <code>window.terminalAPI.createPty(opts)</code> → IPC <code>pty:create</code> to main process via preload<br>
+      <span class="step s">3</span><strong>Main</strong>: <code>node-pty</code> spawns shell (zsh/bash/fish) with <code>cwd</code> from opts; returns <code>ptyId</code><br>
+      <span class="step s">4</span><strong>node-pty → Local Shell</strong>: PTY master fd connected; shell starts in correct directory<br>
+      <span class="step s">5</span><strong>pty:data</strong> events → preload → renderer → <code>xterm.js term.write(data)</code> renders output<br>
+      <span class="step s">6</span><strong>CWD Detection</strong>: <code>checkCwd()</code> probes <code>lsof</code> / <code>/proc/{pid}/cwd</code> → updates <code>tab._cwdPath</code> + tab title<br>
+      <span class="step s">7</span><strong>Session</strong>: <code>buildSessionData()</code> saves title + cwd to <code>localStorage</code> on tab/window close`
+  },
+  ssh: {
+    paths: ['f-ssh-1','f-ssh-2','f-ssh-3','f-ssh-4','f-ssh-5','f-ssh-6','f-ssh-7'],
+    steps: 'steps-ssh',
+    cls: 'ssh',
+    info: `<strong>SSH Connection Flow</strong> — user selects an SSH profile to connect<br>
+      <span class="step g">1</span><strong>Renderer</strong>: <code>connectSSH(profile)</code> → IPC call <code>ssh:connect</code> to main process<br>
+      <span class="step g">2</span><strong>Main</strong>: <code>buildSSHCommand(profile)</code> in <code>ssh-utils.js</code> assembles arg array<br>
+      <span class="step g">3</span>If <code>cloudflareAccess</code> flag: <code>buildCloudflareProxyFlags()</code> + <code>findCloudflared()</code> adds <code>ProxyCommand</code><br>
+      <span class="step g">4</span><strong>node-pty</strong> spawns <code>ssh</code> with built args; <code>wrapWithAskpass()</code> injects password via askpass helper<br>
+      <span class="step g">5</span><strong>SSH</strong> connects to Remote SSH Server; PTY data flows back through <code>pty:data</code> events<br>
+      <span class="step g">6</span><code>maybeFireOscInjection(tab, data)</code> watches output; on first shell prompt → <code>fireOscInjection(tab)</code> sends <code>stty -echo</code> + POSIX <code>_pt_cwd()</code> + <code>PROMPT_COMMAND</code> setup<br>
+      <span class="step g">7</span>Shell emits <strong>OSC 7</strong> → xterm <code>registerOscHandler(7)</code> → <code>tab._remoteCwd</code> populated for SCP dest`
+  },
+  io: {
+    paths: ['f-io-1','f-io-2','f-io-3','f-io-4','f-io-5'],
+    steps: 'steps-io',
+    cls: 'io',
+    info: `<strong>I/O Data Flow</strong> — keystroke to screen, bidirectional PTY communication<br>
+      <span class="step r">1</span><strong>xterm.js</strong>: user keystroke → <code>onData</code> callback → <code>sendInput(tab.ptyId, data)</code> → IPC <code>pty:write</code><br>
+      <span class="step r">2</span><strong>Main</strong>: <code>pty.write(data)</code> → PTY master fd → shell stdin; shell processes keystroke<br>
+      <span class="step r">3</span><strong>Shell stdout</strong> → PTY master → IPC <code>pty:data</code> event → preload callback to renderer<br>
+      <span class="step r">4</span><strong>Renderer</strong>: <code>xterm.js term.write(data)</code> renders output to screen (WebGL renderer)<br>
+      <span class="step r">5</span>Every data chunk: <code>maybeFireOscInjection(tab, data)</code> + <code>onTerminalData(tab, data)</code> for CWD detection`
+  },
+  session: {
+    paths: ['f-session-1','f-session-2','f-session-3','f-session-4','f-session-5','f-session-6'],
+    steps: 'steps-session',
+    cls: 'session',
+    info: `<strong>Session Restore Flow</strong> — app close and reopen restores all tabs<br>
+      <span class="step p">1</span><strong>App close</strong>: <code>buildSessionData()</code> serialises all tabs (title, cwd, protocol, sshProfile) → <code>localStorage</code><br>
+      <span class="step p">2</span><strong>App launch</strong>: <code>restoreSession()</code> reads <code>localStorage</code> → parses saved tab array<br>
+      <span class="step p">3</span>For each saved tab: <code>createTab({...saved, cwd: saved.cwd})</code> — local PTY starts in saved directory from birth<br>
+      <span class="step p">4</span>SSH tabs: <code>scheduleCwdRestore(tab, saved.cwd, 'ssh')</code> sends <code>cd &lt;path&gt;</code> after connection establishes<br>
+      <span class="step p">5</span><code>activateTab(lastActiveId)</code> restores focus to previously active tab<br>
+      <span class="step p">6</span><code>rendererReady()</code> IPC signal → main delivers any buffered open-folder paths (Finder drag-in)`
+  },
+  scp: {
+    paths: ['f-scp-1','f-scp-2','f-scp-3','f-scp-4','f-scp-5'],
+    steps: 'steps-scp',
+    cls: 'scp',
+    info: `<strong>SCP Drag-Drop Upload Flow</strong> — drag a file onto an SSH tab to upload<br>
+      <span class="step o">1</span><strong>Renderer</strong>: user drags file onto SSH tab → <code>dragover</code> + <code>drop</code> events on xterm container<br>
+      <span class="step o">2</span><strong>Dest resolution</strong>: priority order — <code>tab._remoteCwd</code> (from OSC 7) → <code>profile.remotePath</code> → <code>~/</code><br>
+      <span class="step o">3</span>IPC call <code>scp:upload({ptyId, localPath, remotePath, profileId})</code> → main process<br>
+      <span class="step o">4</span><strong>SCP Handler</strong>: builds <code>scp -i key -P port user@host:dest/</code> using <code>buildCommonSSHFlags()</code>; progress overlaid in renderer<br>
+      <span class="step o">5</span>File transferred to <strong>Remote SSH Server</strong>; success/error fed back via IPC reply → renderer shows notification`
+  },
+  stores: {
+    paths: [], steps: null, cls: null,
+    info: `<strong>Data Stores</strong> — persistent and in-memory state used by Prateek-Term`
+  }
+};
+
+let activeFlow = null;
+
+function showSvg(show) {
+  document.getElementById('svg-wrap').style.display = show ? '' : 'none';
+  document.getElementById('stores-panel').style.display = show ? 'none' : 'block';
+}
+
+function setFlow(name) {
+  // Clear all active paths and step labels
+  document.querySelectorAll('.flow-path').forEach(p => p.classList.remove('visible'));
+  document.querySelectorAll('.step-label').forEach(l => l.classList.remove('visible'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+  const panel = document.getElementById('info-panel');
+  panel.className = 'info-panel';
+
+  // Find clicked tab and activate
+  const tabNames = ['startup','ssh','io','session','scp','stores',null];
+  const tabs = document.querySelectorAll('.tab');
+  const idx = tabNames.indexOf(name);
+  if (idx >= 0 && tabs[idx]) tabs[idx].classList.add('active');
+
+  if (!name) {
+    // Overview mode
+    activeFlow = null;
+    showSvg(true);
+    panel.innerHTML = 'Click a flow tab above to highlight paths through the system. <strong>Overview</strong> shows all components without arrows.';
+    return;
+  }
+
+  activeFlow = name;
+  const f = flows[name];
+
+  if (name === 'stores') {
+    showSvg(false);
+    panel.style.display = '';
+    panel.innerHTML = f.info;
+    return;
+  }
+
+  showSvg(true);
+  f.paths.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('visible');
+  });
+  if (f.steps) {
+    const el = document.getElementById(f.steps);
+    if (el) el.classList.add('visible');
+  }
+  if (f.cls) panel.classList.add(f.cls);
+  panel.innerHTML = f.info;
+}
+
+// Start in overview mode
+setFlow(null);
+</script>
+</body>
+</html>

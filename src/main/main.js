@@ -37,6 +37,9 @@ const {
   parseSSHConfig,
   profilesToSSHConfig,
   findCloudflared,
+  buildCloudflareProxyFlags,
+  buildJumpHostProxyCommand,
+  buildIncludePacUrl,
 } = require('./ssh-utils');
 
 function getBuildNumber() {
@@ -1341,6 +1344,35 @@ ipcMain.handle('dialog:selectDirectory', async (event, options = {}) => {
   return result.filePaths[0];
 });
 
+// Launch Chrome with SOCKS5 proxy pre-configured.
+// filterMode 'none'    → all traffic through tunnel (bypass loopback only)
+// filterMode 'exclude' → proxy all except listed IPs/hosts (--proxy-bypass-list)
+// filterMode 'include' → proxy only listed IPs/hosts via PAC (everything else direct)
+ipcMain.handle('shell:openChromeProxy', async (event, { port, filterMode, filterList }) => {
+  const p = parseInt(port, 10);
+  if (!p || p < 1 || p > 65535) throw new Error(`Invalid port: ${port}`);
+  const chromeBin = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+  let proxyFlags;
+  if (filterMode === 'include' && filterList && filterList.trim()) {
+    const pacUrl = buildIncludePacUrl(p, filterList);
+    proxyFlags = `--proxy-pac-url="${pacUrl}"`;
+  } else if (filterMode === 'exclude' && filterList && filterList.trim()) {
+    const entries = filterList.split(',').map(s => s.trim()).filter(Boolean).join(';');
+    proxyFlags = `--proxy-server="socks5://127.0.0.1:${p}" --proxy-bypass-list="<-loopback>;${entries}"`;
+  } else {
+    proxyFlags = `--proxy-server="socks5://127.0.0.1:${p}" --proxy-bypass-list="<-loopback>"`;
+  }
+
+  const cmd = `"${chromeBin}" ${proxyFlags} --user-data-dir="/tmp/chrome-proxy-${p}"`;
+  return new Promise((resolve, reject) => {
+    exec(cmd, (err) => {
+      if (err) reject(err);
+      else resolve(true);
+    });
+  });
+});
+
 // ---------- Remote CWD Detection ----------
 
 ipcMain.handle('terminal:getCwd', (event, { id }) => {
@@ -1376,6 +1408,14 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
   // SSH terminal: PreferredAuthentications, HostKeyAlgorithms, ConnectTimeout,
   // pemFile -i / IdentitiesOnly, strictHostOff, compression, etc.
   const flags = ['-O', ...buildCommonSSHFlags(profile)]; // -O = force legacy SCP protocol
+
+  // ProxyCommand — inherit jump host / Cloudflare tunnel from profile,
+  // so drag-drop SCP works even when the target is only reachable via a jump host.
+  if (profile.cloudflareAccess) {
+    flags.push(...buildCloudflareProxyFlags(profile.cloudflaredPath || null));
+  } else if (profile.proxyEnabled) {
+    flags.push(...buildJumpHostProxyCommand(profile));
+  }
 
   // Recursive flag for directories
   let isDirectory = false;
@@ -1687,6 +1727,8 @@ function spawnPtyForBridge(options) {
   // Register the output buffer BEFORE spawning so no early PTY data is lost
   bridge.ensureBuf(id);
   const term = pty.spawn(shell, args, { name: 'xterm-256color', cols: options.cols || 200, rows: options.rows || 50, cwd, env });
+  // Tag with profile name so remove_profile can detect active sessions
+  if (options.profileName) term._profileName = options.profileName;
   terminals.set(id, term);
 
   term.onData((data) => {
@@ -1696,15 +1738,20 @@ function spawnPtyForBridge(options) {
     }
   });
 
-  // Auto-type password for password-auth SSH sessions created via MCP
+  // Auto-type password for password-auth SSH sessions created via MCP.
+  // One-shot: fires exactly once. Uses a let flag so the closure can clear it
+  // and prevent repeat sends on SSH retry prompts ("Permission denied, try again").
   let pwdBuf = '';
-  const pendingPwd = options._pendingPassword || null;
+  let pendingPwd = options._pendingPassword || null;
   if (pendingPwd) {
     term.onData((data) => {
+      if (!pendingPwd) return; // already fired
       pwdBuf = (pwdBuf + data).slice(-256);
       if (/password/i.test(pwdBuf)) {
+        const pwd = pendingPwd;
+        pendingPwd = null; // clear BEFORE setTimeout so re-entrant data can't re-trigger
         pwdBuf = '';
-        setTimeout(() => term.write(pendingPwd + '\r'), 300);
+        setTimeout(() => term.write(pwd + '\r'), 300);
       }
     });
   }
@@ -1745,6 +1792,12 @@ function startBridgeIfEnabled() {
     terminals,
     serialConns:     serialConnections,
     loadProfiles:    () => loadProfiles(),
+    saveProfiles:    (profiles) => saveProfiles(profiles),
+    broadcastProfilesChanged: () => {
+      BrowserWindow.getAllWindows().forEach(w => {
+        if (!w.isDestroyed()) w.webContents.send('profiles:changed');
+      });
+    },
     connectProfile:  (p) => Promise.resolve(buildSSHCommandForProfile(p)),
     spawnPty:        spawnPtyForBridge,
     writeInput:      (id, data) => { const t = terminals.get(Number(id)); if (t) t.write(data); },

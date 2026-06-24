@@ -438,6 +438,8 @@ const state = {
   scpDirection: 'upload',
   authType: 'key',
   keyMode: 'file', // file | paste
+  proxyAuthType: 'none', // 'none' | 'key' | 'password' — jump host auth mode
+  currentPortForwards: [],  // port forward rules for profile being edited
   sidebarCollapsed: false,
   currentTags: [], // tags for the connection being edited
   activeTagFilter: null, // tag filter on sidebar
@@ -627,6 +629,24 @@ const dom = {
   cfPathRow: document.getElementById('cf-path-row'),
   cfPathInput: document.getElementById('cf-path-input'),
   btnCfDetect: document.getElementById('btn-cf-detect'),
+  // Jump Host section
+  jumpHostSection:        document.getElementById('jump-host-section'),
+  proxyEnabled:           document.getElementById('proxy-enabled'),
+  proxyBody:              document.getElementById('proxy-body'),
+  proxyHost:              document.getElementById('proxy-host'),
+  proxyPort:              document.getElementById('proxy-port'),
+  proxyUsername:          document.getElementById('proxy-username'),
+  proxyPemFile:           document.getElementById('proxy-pem-file'),
+  btnBrowseProxyPem:      document.getElementById('btn-browse-proxy-pem'),
+  btnClearProxyPem:       document.getElementById('btn-clear-proxy-pem'),
+  proxyPasswordInput:     document.getElementById('proxy-password'),
+  btnToggleProxyPassword: document.getElementById('btn-toggle-proxy-password'),
+  proxyKeyRow:            document.getElementById('proxy-key-row'),
+  proxyPasswordRow:       document.getElementById('proxy-password-row'),
+  portForwardSection:  document.getElementById('port-forward-section'),
+  pfRulesList:         document.getElementById('pf-rules-list'),
+  btnAddPfRule:        document.getElementById('btn-add-pf-rule'),
+  btnOpenChromeProxy:  document.getElementById('btn-open-chrome-proxy'),
   serialPort: document.getElementById('serial-port'),
   serialBaud: document.getElementById('serial-baud'),
   serialDatabits: document.getElementById('serial-databits'),
@@ -651,8 +671,11 @@ const dom = {
   btnAddTag: document.getElementById('btn-add-tag'),
   tagSuggestions: document.getElementById('tag-suggestions'),
   // Sidebar
+  mainArea: document.getElementById('main-area'),
   hostsSidebar: document.getElementById('hosts-sidebar'),
   btnToggleSidebar: document.getElementById('btn-toggle-sidebar'),
+  btnSidebarCollapse: document.getElementById('btn-sidebar-collapse'),
+  btnSidebarExpand: document.getElementById('btn-sidebar-expand'),
   btnSidebarAdd: document.getElementById('btn-sidebar-add'),
   sidebarSearchInput: document.getElementById('sidebar-search-input'),
   sidebarTagFilters: document.getElementById('sidebar-tag-filters'),
@@ -1861,10 +1884,11 @@ function shellQuote(s) {
 // ── Hiding the injection ───────────────────────────────────────────
 // Two phases, BOTH leading-space so `HISTCONTROL=ignorespace` /
 // `HIST_IGNORE_SPACE` skips them from history on bash/zsh:
-//   1. ` stty -echo` → shell stops echoing typed chars
+//   1. ` _PT_STTY=$(stty -g); stty -echo` → save full terminal state, disable echo
 //   2. ` <setup>` → invisible (no echo), ends with:
-//        • `stty echo` to restore echo
-//        • `printf '\e[2F\e[0J'` to wipe the visible `stty -echo` line
+//        • `stty "$_PT_STTY"` to restore EXACT terminal state (preserves ctrl+r /
+//          readline ICANON flags); falls back to `stty echo` on busybox ash
+//        • `printf '\e[2F\e[0J'` to wipe the visible phase-1 line
 //
 // Safe to call multiple times — `_oscInjected` guards against double-inject.
 // Callers that want to force re-injection (reconnect) MUST clear
@@ -1884,8 +1908,11 @@ function fireOscInjection(tab) {
   clearTimeout(tab._oscDebounceTimer);
   tab._oscDebounceTimer = null;
 
-  // Phase 1: disable echo (leading space → history skip)
-  window.terminalAPI.sendInput(tab.ptyId, ' stty -echo 2>/dev/null\r');
+  // Phase 1: save full terminal state then disable echo (leading space → history skip).
+  // Using `stty -g` captures ALL terminal flags (including readline/ICANON settings
+  // that ctrl+r depends on). We restore the exact saved state in phase 2 instead of
+  // blindly re-enabling only ECHO — which would leave other flags in a broken state.
+  window.terminalAPI.sendInput(tab.ptyId, ' _PT_STTY=$(stty -g 2>/dev/null); stty -echo 2>/dev/null\r');
 
   // Phase 2: setup (leading space → history skip; invisible because echo off)
   // NOTE: double-quotes inside the JS single-quoted strings are shell double-quotes
@@ -1899,8 +1926,14 @@ function fireOscInjection(tab) {
       'cd(){ command cd "$@" && _pt_cwd; };' +
       '_pt_cwd;' +
       'export PROMPT_COMMAND="_pt_cwd; ${PROMPT_COMMAND:-:}";' +
-      'stty echo 2>/dev/null;' +
-      // Erase the visible `stty -echo` line and redraw prompt on that row
+      // Restore exact terminal state saved in phase 1.
+      // ${_PT_STTY:-echo}: if stty -g succeeded, pass the saved state blob;
+      // if stty -g wasn't available (busybox ash), _PT_STTY is empty so this
+      // falls back to the single word "echo" — i.e. `stty echo` — which at
+      // minimum re-enables the ECHO flag. Either way it's one real command.
+      'stty "${_PT_STTY:-echo}" 2>/dev/null;' +
+      'unset _PT_STTY;' +
+      // Erase the visible phase-1 line and redraw prompt on that row
       'printf \'\\033[2F\\033[0J\'' +
       '\r';
     window.terminalAPI.sendInput(tab.ptyId, setup);
@@ -1948,6 +1981,10 @@ function scheduleCwdRestore(tab, savedCwd, protocol) {
   // (pre-2026-04-23, `_lastCwd` was saved — basename-only, not absolute).
   // `cd packaging` from $HOME fails; better to skip than mislead.
   if (!String(savedCwd).startsWith('/')) return;
+  // Guard: only fire once per tab session (handles reconnect edge cases)
+  if (tab._cwdRestoreFired) return;
+  tab._cwdRestoreFired = true;
+
   if (protocol === 'local') {
     tab._cwdPath = savedCwd;
 
@@ -1958,7 +1995,10 @@ function scheduleCwdRestore(tab, savedCwd, protocol) {
   } else {
     tab._remoteCwd = savedCwd;
   }
-  const delay = protocol === 'local' ? 500 : 2200;
+  // SSH delay: 2800ms gives OSC injection (phase 1 ~1900ms + phase 2 300ms = ~2200ms)
+  // enough time to finish before we send the cd, avoiding a race where
+  // the phase-2 terminal erase (`\033[2F\033[0J`) wipes or duplicates the cd line.
+  const delay = protocol === 'local' ? 500 : 2800;
   setTimeout(() => {
     if (!tab.ptyId) return;
     window.terminalAPI.sendInput(tab.ptyId, ` cd ${shellQuote(savedCwd)}\r`);
@@ -2525,6 +2565,8 @@ async function reconnectTab(tab) {
         tab._pendingPassword = tab.connectionProfile.password;
         tab._pwdBuf = '';
       }
+      // Reset cwd-restore guard so reconnect can re-run it if needed
+      tab._cwdRestoreFired = false;
       if (shellCommand && result.debugCmd) {
         tab.term.writeln(`\x1b[90m▶ ${result.debugCmd}\x1b[0m`);
       }
@@ -2654,9 +2696,30 @@ function setupTerminalListeners() {
 
 // ===== Sidebar =====
 
+function applySidebarCollapsed(collapsed) {
+  state.sidebarCollapsed = collapsed;
+  dom.hostsSidebar.classList.toggle('collapsed', collapsed);
+  // Mirror the state on #main-area so the floating expand rail can show/hide
+  if (dom.mainArea) dom.mainArea.classList.toggle('sidebar-collapsed', collapsed);
+}
+
+/**
+ * Persist the collapsed flag without clobbering other settings: read the
+ * current settings from disk, set the one field, write back.
+ */
+async function persistSidebarCollapsed(collapsed) {
+  try {
+    const s = await window.terminalAPI.loadSettings();
+    s.sidebarCollapsed = collapsed;
+    await window.terminalAPI.saveSettings(s);
+  } catch (e) {
+    try { window.terminalAPI.logRendererError(`persistSidebarCollapsed failed: ${e?.message || e}`); } catch {}
+  }
+}
+
 function toggleSidebar() {
-  state.sidebarCollapsed = !state.sidebarCollapsed;
-  dom.hostsSidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+  applySidebarCollapsed(!state.sidebarCollapsed);
+  persistSidebarCollapsed(state.sidebarCollapsed);
 
   // Refit active terminal after transition
   setTimeout(() => {
@@ -2850,10 +2913,22 @@ function renderSidebarHosts() {
       const host = document.createElement('div');
       host.className = 'sidebar-host';
 
-      const isAiAccessible = (profile.tags || []).some((t) => (t.name || t) === 'ai');
       const tagDots = (profile.tags || []).map((t) =>
         `<span class="host-tag-dot" style="background:${escapeHtml(t.color)}" title="${escapeHtml(t.name)}"></span>`
-      ).join('') + (isAiAccessible ? '<span class="host-ai-badge" title="AI-accessible via MCP">AI</span>' : '');
+      ).join('');
+
+      // Show a Chrome-launch icon when the profile has an enabled dynamic
+      // (SOCKS5) port-forward rule — lets the user launch Chrome via the proxy
+      // straight from the sidebar without opening the profile editor.
+      const socksPf = (profile.portForwards || []).find(
+        (r) => r.enabled && r.type === 'dynamic' && r.localPort
+      );
+      const chromeLaunchHtml = socksPf
+        ? `<button class="host-chrome-launch"
+                   title="Launch Chrome via SOCKS5 proxy (127.0.0.1:${escapeHtml(String(socksPf.localPort))})">
+             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+           </button>`
+        : '';
 
       host.innerHTML = `
         <span class="host-dot ${proto}"></span>
@@ -2861,8 +2936,52 @@ function renderSidebarHosts() {
           <span class="host-label">${escapeHtml(profile.name || profile.host)}</span>
           <span class="host-address">${escapeHtml(profile.username ? profile.username + '@' : '')}${escapeHtml(profile.host)}</span>
         </div>
-        <div class="host-tags">${tagDots}</div>
+        <div class="host-tags">
+          ${tagDots}
+          ${chromeLaunchHtml}
+          <button class="host-ai-toggle${profile.aiEnabled ? ' active' : ''}"
+                  title="${profile.aiEnabled ? 'AI/MCP access on — click to disable' : 'AI/MCP access off — click to enable'}">AI</button>
+        </div>
       `;
+
+      // AI toggle — stop propagation so dblclick/contextmenu don't fire
+      const aiToggle = host.querySelector('.host-ai-toggle');
+      aiToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        profile.aiEnabled = !profile.aiEnabled;
+        aiToggle.classList.toggle('active', profile.aiEnabled);
+        aiToggle.title = profile.aiEnabled ? 'AI/MCP access on — click to disable' : 'AI/MCP access off — click to enable';
+        window.terminalAPI.saveProfiles(state.profiles);
+      });
+
+      // Chrome-via-proxy launch — stop propagation so dblclick/contextmenu don't fire
+      const chromeLaunch = host.querySelector('.host-chrome-launch');
+      if (chromeLaunch && socksPf) {
+        chromeLaunch.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (chromeLaunch.classList.contains('launching')) return;
+          chromeLaunch.classList.add('launching');
+          try {
+            await window.terminalAPI.openChromeWithProxy(
+              socksPf.localPort,
+              socksPf.proxyFilterMode || 'none',
+              socksPf.proxyFilterList || ''
+            );
+          } catch (err) {
+            // Chrome not installed / launch failed — flag the button briefly
+            chromeLaunch.classList.add('launch-error');
+            chromeLaunch.title = 'Chrome not found';
+            setTimeout(() => {
+              chromeLaunch.classList.remove('launch-error');
+              chromeLaunch.title = `Launch Chrome via SOCKS5 proxy (127.0.0.1:${socksPf.localPort})`;
+            }, 2500);
+          } finally {
+            setTimeout(() => chromeLaunch.classList.remove('launching'), 1200);
+          }
+        });
+      }
 
       host.addEventListener('dblclick', () => {
         quickConnect(profile);
@@ -3350,6 +3469,8 @@ function resetConnectionForm() {
   document.querySelectorAll('.profile-item.selected').forEach((el) => {
     el.classList.remove('selected');
   });
+
+  setSaveButtonMode('save');
 }
 
 function updateProtocolSections() {
@@ -3379,7 +3500,9 @@ function updateProtocolSections() {
   dom.telnetOptionsSection.classList.toggle('hidden', protocol !== 'telnet');
   dom.ftpOptionsSection.classList.toggle('hidden', protocol !== 'ftp');
   dom.serialOptionsSection.classList.toggle('hidden', !isSerial);
-  dom.cloudflareSection.classList.toggle('hidden', !isSSH);
+  dom.cloudflareSection?.classList.toggle('hidden', !isSSH);
+  dom.jumpHostSection?.classList.toggle('hidden', !isSSH);
+  dom.portForwardSection?.classList.toggle('hidden', !isSSH);
 
   if (isSerial) {
     populateSerialPorts();
@@ -3414,6 +3537,117 @@ function setSSHMode(mode) {
   document.querySelectorAll('.scp-only-option').forEach((el) => {
     el.classList.toggle('hidden', mode !== 'scp');
   });
+}
+
+function setProxyAuthType(type) {
+  state.proxyAuthType = type;
+  // [data-proxy-auth] distinguishes these from main auth buttons ([data-auth])
+  document.querySelectorAll('.auth-type-btn[data-proxy-auth]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.proxyAuth === type);
+  });
+  dom.proxyKeyRow.classList.toggle('hidden', type !== 'key');
+  dom.proxyPasswordRow.classList.toggle('hidden', type !== 'password');
+}
+
+function renderPfRules() {
+  dom.pfRulesList.innerHTML = '';
+  state.currentPortForwards.forEach((rule, idx) => {
+    const row = document.createElement('div');
+    row.className = 'pf-rule';
+
+    const isDynamic = rule.type === 'dynamic';
+
+    row.innerHTML = `
+      <input type="checkbox" class="pf-toggle" title="Enable this rule" ${rule.enabled ? 'checked' : ''}>
+      <select class="pf-type-select">
+        <option value="dynamic"  ${rule.type === 'dynamic'  ? 'selected' : ''}>SOCKS5 Dynamic</option>
+        <option value="local"    ${rule.type === 'local'    ? 'selected' : ''}>Local Forward</option>
+        <option value="remote"   ${rule.type === 'remote'   ? 'selected' : ''}>Remote Forward</option>
+      </select>
+      <span class="pf-label">Port</span>
+      <input type="number" class="pf-local-port" placeholder="1080" min="1" max="65535" value="${rule.localPort || ''}">
+      <span class="pf-sep pf-arrow ${isDynamic ? 'hidden' : ''}">→</span>
+      <input type="text"   class="pf-remote-host ${isDynamic ? 'hidden' : ''}" placeholder="192.168.2.120" value="${rule.remoteHost || ''}">
+      <span class="pf-sep ${isDynamic ? 'hidden' : ''}">:</span>
+      <input type="number" class="pf-remote-port ${isDynamic ? 'hidden' : ''}" placeholder="80" min="1" max="65535" value="${rule.remotePort || ''}">
+      <button type="button" class="btn-pf-remove" title="Remove rule">×</button>
+    `;
+
+    // enable/disable toggle
+    row.querySelector('.pf-toggle').addEventListener('change', (e) => {
+      state.currentPortForwards[idx].enabled = e.target.checked;
+    });
+
+    // type select — show/hide remote fields
+    row.querySelector('.pf-type-select').addEventListener('change', (e) => {
+      state.currentPortForwards[idx].type = e.target.value;
+      const dyn = e.target.value === 'dynamic';
+      row.querySelectorAll('.pf-sep').forEach(s => s.classList.toggle('hidden', dyn));
+      row.querySelector('.pf-remote-host').classList.toggle('hidden', dyn);
+      row.querySelector('.pf-remote-port').classList.toggle('hidden', dyn);
+    });
+
+    // live-update state on input
+    row.querySelector('.pf-local-port').addEventListener('input', (e) => {
+      state.currentPortForwards[idx].localPort = parseInt(e.target.value) || null;
+    });
+    row.querySelector('.pf-remote-host').addEventListener('input', (e) => {
+      state.currentPortForwards[idx].remoteHost = e.target.value.trim();
+    });
+    row.querySelector('.pf-remote-port').addEventListener('input', (e) => {
+      state.currentPortForwards[idx].remotePort = parseInt(e.target.value) || null;
+    });
+
+    // remove
+    row.querySelector('.btn-pf-remove').addEventListener('click', () => {
+      state.currentPortForwards.splice(idx, 1);
+      renderPfRules();
+      setSaveButtonMode('save');
+    });
+
+    // Filter row — only for Dynamic (SOCKS5) rules
+    if (isDynamic) {
+      const fMode = rule.proxyFilterMode || 'none';
+      const filterRow = document.createElement('div');
+      filterRow.className = 'pf-filter-row';
+      filterRow.innerHTML = `
+        <span class="pf-label" style="opacity:0.6;font-size:11px;width:auto;">Filter</span>
+        <div class="pf-filter-btns">
+          <button type="button" class="pf-filter-btn${fMode==='none'?' active':''}" data-fmode="none">All traffic</button>
+          <button type="button" class="pf-filter-btn${fMode==='include'?' active':''}" data-fmode="include">Include only</button>
+          <button type="button" class="pf-filter-btn${fMode==='exclude'?' active':''}" data-fmode="exclude">Exclude</button>
+        </div>
+        <input type="text" class="pf-filter-list${fMode==='none'?' hidden':''}"
+               placeholder="192.168.2.0/24, *.company.com, 10.0.0.5"
+               value="${(rule.proxyFilterList || '').replace(/"/g, '&quot;')}">
+      `;
+      filterRow.querySelectorAll('.pf-filter-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const newMode = btn.dataset.fmode;
+          state.currentPortForwards[idx].proxyFilterMode = newMode;
+          filterRow.querySelectorAll('.pf-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.fmode === newMode));
+          filterRow.querySelector('.pf-filter-list').classList.toggle('hidden', newMode === 'none');
+          setSaveButtonMode('save');
+          renderPfRules();
+        });
+      });
+      filterRow.querySelector('.pf-filter-list').addEventListener('input', (e) => {
+        state.currentPortForwards[idx].proxyFilterList = e.target.value;
+      });
+      row.appendChild(filterRow);
+    }
+
+    dom.pfRulesList.appendChild(row);
+  });
+
+  // Show "Open Chrome" button only when at least one enabled Dynamic rule exists
+  const socksPf = state.currentPortForwards.find(r => r.enabled && r.type === 'dynamic' && r.localPort);
+  if (dom.btnOpenChromeProxy) {
+    dom.btnOpenChromeProxy.style.display = socksPf ? '' : 'none';
+    dom.btnOpenChromeProxy.dataset.port       = socksPf ? String(socksPf.localPort) : '';
+    dom.btnOpenChromeProxy.dataset.filterMode = socksPf ? (socksPf.proxyFilterMode || 'none') : '';
+    dom.btnOpenChromeProxy.dataset.filterList = socksPf ? (socksPf.proxyFilterList || '') : '';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3505,6 +3739,15 @@ function getFormData() {
 
     data.cloudflareAccess = dom.cfAccessEnabled.checked;
     data.cloudflaredPath = dom.cfAccessEnabled.checked ? (dom.cfPathInput.value.trim() || null) : null;
+    // Jump Host
+    data.proxyEnabled  = dom.proxyEnabled.checked;
+    data.proxyHost     = dom.proxyEnabled.checked ? (dom.proxyHost.value.trim() || null) : null;
+    data.proxyPort     = dom.proxyEnabled.checked && dom.proxyPort.value ? parseInt(dom.proxyPort.value, 10) : null;
+    data.proxyUsername = dom.proxyEnabled.checked ? (dom.proxyUsername.value.trim() || null) : null;
+    data.proxyAuthType = state.proxyAuthType;
+    data.proxyPemFile  = state.proxyAuthType === 'key' ? (dom.proxyPemFile.value.trim() || null) : null;
+    data.proxyPassword = state.proxyAuthType === 'password' ? dom.proxyPasswordInput.value : null;
+    data.portForwards = state.currentPortForwards.map(r => ({ ...r }));
 
     if (state.sshMode === 'scp') {
       data.direction = state.scpDirection;
@@ -3577,6 +3820,19 @@ function populateForm(profile) {
       setCfStatus('idle');
     }
 
+    // Jump Host
+    const proxyOn = !!profile.proxyEnabled;
+    dom.proxyEnabled.checked = proxyOn;
+    dom.proxyBody.classList.toggle('hidden', !proxyOn);
+    dom.proxyHost.value          = profile.proxyHost     || '';
+    dom.proxyPort.value          = profile.proxyPort     || '';
+    dom.proxyUsername.value      = profile.proxyUsername || '';
+    dom.proxyPemFile.value       = profile.proxyPemFile  || '';
+    dom.proxyPasswordInput.value = profile.proxyPassword || '';
+    setProxyAuthType(profile.proxyAuthType || 'none');
+    state.currentPortForwards = (profile.portForwards || []).map(r => ({ ...r }));
+    renderPfRules();
+
     if (profile.sshMode === 'scp') {
       setSCPDirection(profile.direction || 'upload');
       dom.connSCPLocal.value = profile.localPath || '';
@@ -3609,6 +3865,7 @@ function populateForm(profile) {
   renderActionsList();
 
   updateProtocolSections();
+  setSaveButtonMode('close');
 }
 
 // ===== Profile Management =====
@@ -3719,6 +3976,32 @@ function selectProfile(profile) {
   renderProfilesList();
 }
 
+const SAVE_BTN_SAVE_HTML  = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Save';
+const SAVE_BTN_SAVED_HTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved';
+const SAVE_BTN_CLOSE_HTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Close';
+
+let _savedFlashTimer = null;
+
+function setSaveButtonMode(mode) {
+  const btn = dom.btnSaveProfile;
+  if (!btn) return;
+  if (_savedFlashTimer) { clearTimeout(_savedFlashTimer); _savedFlashTimer = null; }
+  if (mode === 'saved') {
+    btn.dataset.mode = 'close';
+    btn.innerHTML = SAVE_BTN_SAVED_HTML;
+    btn.style.cssText = 'background:var(--green,#a6e3a1);color:#1e1e2e;border-color:var(--green,#a6e3a1);';
+    _savedFlashTimer = setTimeout(() => setSaveButtonMode('close'), 2000);
+  } else if (mode === 'close') {
+    btn.dataset.mode = 'close';
+    btn.innerHTML = SAVE_BTN_CLOSE_HTML;
+    btn.style.cssText = 'opacity:0.7;';
+  } else {
+    btn.dataset.mode = 'save';
+    btn.innerHTML = SAVE_BTN_SAVE_HTML;
+    btn.style.cssText = '';
+  }
+}
+
 function saveCurrentProfile() {
   const formData = getFormData();
 
@@ -3748,6 +4031,8 @@ function saveCurrentProfile() {
   saveAllProfiles();
   renderProfilesList();
   dom.btnDeleteProfile.classList.remove('hidden');
+
+  setSaveButtonMode('saved');
 }
 
 function deleteCurrentProfile() {
@@ -3990,6 +4275,8 @@ function setupEventListeners() {
 
   // Sidebar toggle
   dom.btnToggleSidebar.addEventListener('click', toggleSidebar);
+  if (dom.btnSidebarCollapse) dom.btnSidebarCollapse.addEventListener('click', toggleSidebar);
+  if (dom.btnSidebarExpand)   dom.btnSidebarExpand.addEventListener('click', toggleSidebar);
 
   // Sidebar add button
   dom.btnSidebarAdd.addEventListener('click', openConnectionManager);
@@ -4128,8 +4415,15 @@ function setupEventListeners() {
   // New profile button
   dom.btnNewProfile.addEventListener('click', resetConnectionForm);
 
-  // Save profile
-  dom.btnSaveProfile.addEventListener('click', saveCurrentProfile);
+  // Save profile (or Close when no changes made)
+  dom.btnSaveProfile.addEventListener('click', () => {
+    if (dom.btnSaveProfile.dataset.mode === 'close') closeConnectionManager();
+    else saveCurrentProfile();
+  });
+
+  // Switch to "Save" mode whenever the user edits any form field
+  dom.connectionForm.addEventListener('input',  () => setSaveButtonMode('save'));
+  dom.connectionForm.addEventListener('change', () => setSaveButtonMode('save'));
 
   // Delete profile
   dom.btnDeleteProfile.addEventListener('click', deleteCurrentProfile);
@@ -4188,6 +4482,7 @@ function setupEventListeners() {
   document.querySelectorAll('.auth-type-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       setAuthType(btn.dataset.auth);
+      setSaveButtonMode('save');
     });
   });
 
@@ -4201,6 +4496,7 @@ function setupEventListeners() {
   document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       setSSHMode(btn.dataset.mode);
+      setSaveButtonMode('save');
     });
   });
 
@@ -4222,12 +4518,14 @@ function setupEventListeners() {
     });
     if (filePath) {
       dom.connPem.value = filePath;
+      setSaveButtonMode('save');
     }
   });
 
   // Clear PEM
   dom.btnClearPem.addEventListener('click', () => {
     dom.connPem.value = '';
+    setSaveButtonMode('save');
   });
 
   // Browse local path (SCP)
@@ -4237,6 +4535,7 @@ function setupEventListeners() {
     });
     if (dirPath) {
       dom.connSCPLocal.value = dirPath;
+      setSaveButtonMode('save');
     }
   });
 
@@ -4269,6 +4568,77 @@ function setupEventListeners() {
   // Manual re-detect button
   dom.btnCfDetect.addEventListener('click', () => {
     runCloudflaredDetect(dom.cfPathInput.value.trim() || null);
+  });
+
+  // Jump Host toggle
+  dom.proxyEnabled.addEventListener('change', () => {
+    dom.proxyBody.classList.toggle('hidden', !dom.proxyEnabled.checked);
+  });
+
+  // Jump Host auth-type buttons (data-proxy-auth distinguishes from main auth buttons)
+  document.querySelectorAll('.auth-type-btn[data-proxy-auth]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setProxyAuthType(btn.dataset.proxyAuth);
+      setSaveButtonMode('save');
+    });
+  });
+
+  // Browse jump host key file
+  dom.btnBrowseProxyPem.addEventListener('click', async () => {
+    const filePath = await window.terminalAPI.openFileDialog({
+      title: 'Select Jump Host Identity File',
+      filters: [
+        { name: 'Key Files', extensions: ['pem', 'key', 'pub', 'ppk'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (filePath) {
+      dom.proxyPemFile.value = filePath;
+      setSaveButtonMode('save');
+    }
+  });
+
+  dom.btnClearProxyPem.addEventListener('click', () => {
+    dom.proxyPemFile.value = '';
+    setSaveButtonMode('save');
+  });
+
+  // Show/hide jump host password
+  dom.btnToggleProxyPassword.addEventListener('click', () => {
+    dom.proxyPasswordInput.type = dom.proxyPasswordInput.type === 'password' ? 'text' : 'password';
+  });
+
+  // Open Chrome with SOCKS5 proxy pre-configured
+  dom.btnOpenChromeProxy.addEventListener('click', async () => {
+    const port = parseInt(dom.btnOpenChromeProxy.dataset.port, 10);
+    if (!port) return;
+    const filterMode = dom.btnOpenChromeProxy.dataset.filterMode || 'none';
+    const filterList = dom.btnOpenChromeProxy.dataset.filterList || '';
+    try {
+      await window.terminalAPI.openChromeWithProxy(port, filterMode, filterList);
+    } catch (e) {
+      // Chrome might not be installed — show brief inline error
+      dom.btnOpenChromeProxy.textContent = 'Chrome not found';
+      setTimeout(() => {
+        dom.btnOpenChromeProxy.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:middle;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>Launch Chrome via this proxy';
+      }, 2500);
+    }
+  });
+
+  // Port forwarding — add new rule
+  dom.btnAddPfRule.addEventListener('click', () => {
+    state.currentPortForwards.push({
+      id: 'pf_' + Math.random().toString(36).slice(2, 9),
+      enabled: true,
+      type: 'dynamic',
+      localPort: null,
+      remoteHost: '',
+      remotePort: null,
+      proxyFilterMode: 'none',
+      proxyFilterList: '',
+    });
+    renderPfRules();
+    setSaveButtonMode('save');
   });
 
   // Keyboard shortcuts
@@ -4474,6 +4844,7 @@ async function openSettings() {
     logRotateSizeMB: 50,
     logRotateAgeDays: 30,
     logRotateMaxFiles: 5,
+    sidebarCollapsed: false,
     ...s,
   };
   // Populate rotation inputs
@@ -4869,11 +5240,15 @@ async function init() {
     const savedSettings = await window.terminalAPI.loadSettings();
     state.currentTheme = savedSettings.theme || 'catppuccin-mocha';
     applyTheme(state.currentTheme);
+    // Restore persisted sidebar collapsed state
+    if (savedSettings.sidebarCollapsed) applySidebarCollapsed(true);
     await loadProfiles();
     await restoreSession();
     window.terminalAPI.onOpenSettings(openSettings);
     window.terminalAPI.onOpenFolder(openLocalFolderTab);
     window.terminalAPI.onAutoConnect((profile) => quickConnect(profile));
+    // Reload profile list when MCP adds/removes a profile from outside the renderer
+    window.terminalAPI.onProfilesChanged(() => loadProfiles());
     window.terminalAPI.rendererReady();   // flush any buffered open-folder URLs
     setupUpdateBanner();
     // Set window title with version and build number

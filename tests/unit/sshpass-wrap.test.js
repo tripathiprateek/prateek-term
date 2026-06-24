@@ -37,7 +37,13 @@ jest.mock('crypto', () => ({
   randomBytes: jest.fn(() => Buffer.from('deadbeef01020304', 'hex')),
 }));
 
-const { wrapWithAskpass, writeAskpassScript } = require('../../src/main/ssh-utils');
+const {
+  wrapWithAskpass,
+  writeAskpassScript,
+  wrapWithSshpass,
+  buildSFTPCommand,
+  buildSCPCommand,
+} = require('../../src/main/ssh-utils');
 
 // ---------------------------------------------------------------------------
 // writeAskpassScript
@@ -138,5 +144,74 @@ describe('wrapWithAskpass — key/no-password auth', () => {
     const r = wrapWithAskpass('ssh', ['host'], { password: 'secret', pemFile: '/home/user/.ssh/id_rsa' });
     expect(r.command).toBe('ssh');
     expect(r.env.SSH_ASKPASS).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wrapWithSshpass — used by SFTP/SCP (not SSH terminal, which uses wrapWithAskpass)
+// ---------------------------------------------------------------------------
+
+describe('wrapWithSshpass', () => {
+  // sshpass is mocked as "not found" (accessSync throws, execSync throws)
+  // so all tests below validate the no-sshpass fallback path
+
+  test('returns original command when sshpass not installed', () => {
+    const r = wrapWithSshpass('sftp', ['-P', '22', 'admin@host'], { password: 'secret' });
+    expect(r.command).toBe('sftp');
+  });
+
+  test('original args preserved when sshpass not installed', () => {
+    const r = wrapWithSshpass('sftp', ['-P', '22', 'admin@host'], { password: 'secret' });
+    expect(r.args).toEqual(['-P', '22', 'admin@host']);
+  });
+
+  test('returns plain command when no password (key-based auth)', () => {
+    const r = wrapWithSshpass('sftp', ['admin@host'], { password: null });
+    expect(r.command).toBe('sftp');
+    expect(r.env).toEqual({});
+  });
+
+  test('returns plain command when password is empty string', () => {
+    const r = wrapWithSshpass('scp', ['-P', '22'], { password: '' });
+    expect(r.command).toBe('scp');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SFTP / SCP password-auth — SCP upload uses buildCommonSSHFlags (BUG-005)
+// ---------------------------------------------------------------------------
+
+describe('SCP upload — uses buildCommonSSHFlags for auth (password devices)', () => {
+  test('buildSCPCommand password profile: command is scp (not sshpass) when sshpass absent', () => {
+    const profile = {
+      host: '192.168.1.1', username: 'admin', port: 22,
+      password: 'secret',
+      direction: 'upload', localPath: '/tmp/file.txt', remotePath: '/uploads',
+    };
+    const { command } = buildSCPCommand(profile);
+    // When sshpass not installed, falls back to plain scp
+    expect(command).toBe('scp');
+  });
+
+  test('buildSCPCommand includes -o PreferredAuthentications for password profile', () => {
+    const profile = {
+      host: '192.168.1.1', username: 'admin', port: 22,
+      password: 'secret',
+      direction: 'upload', localPath: '/tmp/file.txt', remotePath: '/uploads',
+    };
+    const { args } = buildSCPCommand(profile);
+    const paIdx = args.indexOf('-o');
+    const prefAuth = args.slice(paIdx).find(a => a.startsWith('PreferredAuthentications'));
+    expect(prefAuth).toBeDefined();
+    expect(prefAuth).toContain('keyboard-interactive');
+  });
+
+  test('buildSFTPCommand password profile: command is sftp (not sshpass) when sshpass absent', () => {
+    const profile = {
+      host: '192.168.1.1', username: 'admin', port: 22,
+      password: 'secret',
+    };
+    const { command } = buildSFTPCommand(profile);
+    expect(command).toBe('sftp');
   });
 });

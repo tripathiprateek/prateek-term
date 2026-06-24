@@ -28,19 +28,21 @@ function freshBridge() {
 
 function makeMinimalOpts(overrides = {}) {
   return {
-    terminals:       new Map(),
-    serialConns:     new Map(),
-    loadProfiles:    () => [],
-    connectProfile:  () => Promise.resolve({ command: 'ssh', args: [], env: {}, _cleanupFiles: [] }),
-    spawnPty:        () => Promise.resolve({ id: '1' }),
-    writeInput:      () => {},
-    killSession:     () => {},
-    listSerialPorts: () => Promise.resolve([]),
-    serialConnect:   () => Promise.resolve({ id: 'serial-1' }),
-    serialWrite:     () => {},
-    serialClose:     () => {},
-    getVersion:      () => '1.0.0-test',
-    port:            0, // OS-assigned port
+    terminals:                new Map(),
+    serialConns:              new Map(),
+    loadProfiles:             () => [],
+    saveProfiles:             () => {},
+    broadcastProfilesChanged: () => {},
+    connectProfile:           () => Promise.resolve({ command: 'ssh', args: [], env: {}, _cleanupFiles: [] }),
+    spawnPty:                 () => Promise.resolve({ id: '1' }),
+    writeInput:               () => {},
+    killSession:              () => {},
+    listSerialPorts:          () => Promise.resolve([]),
+    serialConnect:            () => Promise.resolve({ id: 'serial-1' }),
+    serialWrite:              () => {},
+    serialClose:              () => {},
+    getVersion:               () => '1.0.0-test',
+    port:                     0, // OS-assigned port
     ...overrides,
   };
 }
@@ -101,6 +103,31 @@ function httpDelete(port, urlPath, token) {
         catch { resolve({ status: res.statusCode, body }); }
       });
     }).on('error', reject).end();
+  });
+}
+
+function httpDeleteWithBody(port, urlPath, token, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload || {});
+    const opts = {
+      hostname: '127.0.0.1', port, path: urlPath, method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    };
+    const req = http.request(opts, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(body) }); }
+        catch { resolve({ status: res.statusCode, body }); }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
   });
 }
 
@@ -189,7 +216,7 @@ describe('http-bridge — HTTP server', () => {
     expect(res.status).toBe(401);
   });
 
-  test('GET /profiles returns empty array when no ai-tagged profiles', async () => {
+  test('GET /profiles returns empty array when no AI-enabled profiles', async () => {
     if (!port) return;
     const res = await httpGet(port, '/profiles', token);
     expect(res.status).toBe(200);
@@ -197,7 +224,7 @@ describe('http-bridge — HTTP server', () => {
     expect(res.body).toHaveLength(0);
   });
 
-  test('GET /profiles strips credentials from ai-tagged profiles', async () => {
+  test('GET /profiles strips credentials from AI-enabled profiles', async () => {
     if (!port) return;
     bridge.stop();
     bridge = freshBridge();
@@ -211,7 +238,7 @@ describe('http-bridge — HTTP server', () => {
         password: 'secret',
         pemFile: '/path/to/key.pem',
         pemText: '-----BEGIN RSA PRIVATE KEY-----',
-        tags: [{ name: 'ai', color: '#89b4fa' }],
+        aiEnabled: true,
       }],
     });
     bridge.start(opts);
@@ -229,7 +256,7 @@ describe('http-bridge — HTTP server', () => {
     bridge.stop();
   });
 
-  test('GET /profiles excludes profiles not tagged ai', async () => {
+  test('GET /profiles excludes profiles without AI/MCP access enabled', async () => {
     if (!port) return;
     bridge.stop();
     bridge = freshBridge();
@@ -237,7 +264,7 @@ describe('http-bridge — HTTP server', () => {
       port: 0,
       loadProfiles: () => [
         { name: 'Secret', protocol: 'ssh', tags: [{ name: 'work', color: '#f38ba8' }] },
-        { name: 'Public', protocol: 'ssh', tags: [{ name: 'ai', color: '#89b4fa' }] },
+        { name: 'Public', protocol: 'ssh', aiEnabled: true },
       ],
     });
     bridge.start(opts);
@@ -281,19 +308,19 @@ describe('http-bridge — HTTP server', () => {
   });
 });
 
-describe('http-bridge — profile ai-tag filtering', () => {
-  test('tag as plain string "ai" is accepted', () => {
+describe('http-bridge — profile aiEnabled filtering', () => {
+  test('aiEnabled: true makes profile AI-accessible', () => {
     const bridge = freshBridge();
     const opts = makeMinimalOpts({
       port: 0,
       loadProfiles: () => [{
         name: 'Dev',
         protocol: 'local',
-        tags: ['ai'],  // plain string tag variant
+        aiEnabled: true,
       }],
     });
     bridge.start(opts);
-    // Doesn't throw — coverage for the string-tag path
+    // Doesn't throw — coverage for the aiEnabled path
     bridge.stop();
   });
 });
@@ -420,7 +447,7 @@ describe('http-bridge — POST /upload endpoint', () => {
           protocol: 'ssh',
           host: '192.168.1.1',
           username: 'root',
-          tags: [{ name: 'ai', color: '#89b4fa' }],
+          aiEnabled: true,
         },
         {
           name: 'Private',
@@ -466,11 +493,11 @@ describe('http-bridge — POST /upload endpoint', () => {
     expect(res.body.error).toContain('NonExistent');
   });
 
-  test('returns 403 when profile is not ai-tagged', async () => {
+  test('returns 403 when profile does not have AI/MCP access enabled', async () => {
     if (!port) return;
     const res = await httpPost(port, '/upload', token, { profileName: 'Private', localPath: '/tmp/local', remotePath: '/tmp/remote' });
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain('ai-accessible');
+    expect(res.body.error).toContain('AI/MCP');
   });
 });
 
@@ -487,7 +514,7 @@ describe('http-bridge — path traversal guard on upload', () => {
           protocol: 'ssh',
           host: '192.168.1.1',
           username: 'root',
-          tags: [{ name: 'ai', color: '#89b4fa' }],
+          aiEnabled: true,
         },
       ],
     });
@@ -539,7 +566,7 @@ describe('http-bridge — path traversal guard on download', () => {
           protocol: 'ssh',
           host: '192.168.1.1',
           username: 'root',
-          tags: [{ name: 'ai', color: '#89b4fa' }],
+          aiEnabled: true,
         },
       ],
     });
@@ -659,5 +686,282 @@ describe('http-bridge — GET /sessions/:id/status endpoint', () => {
     expect(res.status).toBe(200);
     expect(res.body.state).toBe('disconnected');
     expect(res.body.alive).toBe(false);
+  });
+});
+
+// ── POST /profiles ─────────────────────────────────────────────────────────
+
+describe('http-bridge — POST /profiles (add_profile)', () => {
+  let bridge, port, token, saved;
+
+  function waitForPort(done) {
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      port = bridge.getPort();
+      token = bridge.getToken();
+      if (port > 0 || tries > 30) { clearInterval(iv); done(); }
+    }, 10);
+  }
+
+  beforeEach((done) => {
+    bridge = freshBridge();
+    saved  = [];
+    const opts = makeMinimalOpts({
+      loadProfiles:             () => [...saved],
+      saveProfiles:             (profiles) => { saved = profiles; },
+      broadcastProfilesChanged: jest.fn(),
+      port: 0,
+    });
+    bridge.start(opts);
+    setImmediate(() => waitForPort(done));
+  });
+
+  afterEach(() => { bridge.stop(); });
+
+  test('creates a profile and returns 201', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, {
+      name: 'Test Router', protocol: 'ssh', host: '192.168.1.1',
+      username: 'admin', authType: 'password', password: 'secret',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.profile.name).toBe('Test Router');
+    expect(res.body.profile.protocol).toBe('ssh');
+    expect(res.body.profile.host).toBe('192.168.1.1');
+  });
+
+  test('persists profile via saveProfiles callback', async () => {
+    if (!port) return;
+    await httpPost(port, '/profiles', token, { name: 'Persisted', host: '10.0.0.1' });
+    expect(saved.length).toBe(1);
+    expect(saved[0].name).toBe('Persisted');
+  });
+
+  test('assigns a random hex id to new profile', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'HasId', host: '10.0.0.2' });
+    expect(res.body.profile.id).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  test('aiEnabled defaults to false', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'DefaultAI', host: '10.0.0.3' });
+    expect(res.body.profile.aiEnabled).toBe(false);
+  });
+
+  test('aiEnabled can be set to true explicitly', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'AIOn', host: '10.0.0.4', aiEnabled: true });
+    expect(res.body.profile.aiEnabled).toBe(true);
+  });
+
+  test('returns 400 when name is missing', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { host: '10.0.0.5' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/name/i);
+  });
+
+  test('returns 400 when host missing for ssh protocol', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'NoHost', protocol: 'ssh' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/host/i);
+  });
+
+  test('returns 400 for invalid protocol', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'BadProto', host: 'x', protocol: 'rdp' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/protocol/i);
+  });
+
+  test('returns 409 when name already exists', async () => {
+    if (!port) return;
+    await httpPost(port, '/profiles', token, { name: 'Dup', host: '10.0.0.6' });
+    const res = await httpPost(port, '/profiles', token, { name: 'Dup', host: '10.0.0.6' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already exists/i);
+  });
+
+  test('local protocol does not require host', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', token, { name: 'LocalShell', protocol: 'local' });
+    expect(res.status).toBe(201);
+  });
+
+  test('returns 401 without token', async () => {
+    if (!port) return;
+    const res = await httpPost(port, '/profiles', null, { name: 'Unauth', host: '10.0.0.7' });
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── DELETE /profiles/:name ─────────────────────────────────────────────────
+
+describe('http-bridge — DELETE /profiles/:name (remove_profile)', () => {
+  let bridge, port, token, saved;
+
+  function waitForPort(done) {
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      port = bridge.getPort();
+      token = bridge.getToken();
+      if (port > 0 || tries > 30) { clearInterval(iv); done(); }
+    }, 10);
+  }
+
+  beforeEach((done) => {
+    bridge = freshBridge();
+    saved  = [
+      { id: 'aaa', name: 'Router A', protocol: 'ssh', host: '10.0.0.1', aiEnabled: true },
+      { id: 'bbb', name: 'Router B', protocol: 'ssh', host: '10.0.0.2', aiEnabled: false },
+    ];
+    const opts = makeMinimalOpts({
+      loadProfiles:             () => [...saved],
+      saveProfiles:             (profiles) => { saved = profiles; },
+      broadcastProfilesChanged: jest.fn(),
+      port: 0,
+    });
+    bridge.start(opts);
+    setImmediate(() => waitForPort(done));
+  });
+
+  afterEach(() => { bridge.stop(); });
+
+  test('removes existing profile and returns 200', async () => {
+    if (!port) return;
+    const res = await httpDeleteWithBody(port, '/profiles/Router%20A', token, {});
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.removed.name).toBe('Router A');
+  });
+
+  test('persists removal via saveProfiles callback', async () => {
+    if (!port) return;
+    await httpDeleteWithBody(port, '/profiles/Router%20A', token, {});
+    expect(saved.length).toBe(1);
+    expect(saved[0].name).toBe('Router B');
+  });
+
+  test('returns 404 for unknown profile name', async () => {
+    if (!port) return;
+    const res = await httpDeleteWithBody(port, '/profiles/Unknown', token, {});
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  test('returns 401 without token', async () => {
+    if (!port) return;
+    const res = await httpDeleteWithBody(port, '/profiles/Router%20A', null, {});
+    expect(res.status).toBe(401);
+  });
+
+  test('returns 409 when active session exists and force not set', (done) => {
+    if (!port) return done();
+    const fakeTerm = { _profileName: 'Router A', write: () => {}, kill: () => {}, onData: () => {}, onExit: () => {} };
+    const terminals = new Map([['99', fakeTerm]]);
+
+    bridge.stop();
+    bridge = freshBridge();
+    const opts = makeMinimalOpts({
+      terminals,
+      loadProfiles:             () => [{ id: 'aaa', name: 'Router A', protocol: 'ssh', host: '10.0.0.1', aiEnabled: true }],
+      saveProfiles:             jest.fn(),
+      broadcastProfilesChanged: jest.fn(),
+      port: 0,
+    });
+    bridge.start(opts);
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries++;
+      const p2 = bridge.getPort();
+      const t2 = bridge.getToken();
+      if (p2 > 0 || tries > 30) {
+        clearInterval(iv);
+        const res = await httpDeleteWithBody(p2, '/profiles/Router%20A', t2, {});
+        expect(res.status).toBe(409);
+        expect(res.body.error).toMatch(/active session/i);
+        expect(res.body.activeSessions).toContain('99');
+        done();
+      }
+    }, 10);
+  });
+
+  test('force:true kills active sessions and removes profile', (done) => {
+    if (!port) return done();
+    const killed = [];
+    const fakeTerm = { _profileName: 'Router A', write: () => {}, kill: () => {}, onData: () => {}, onExit: () => {} };
+    const terminals = new Map([['77', fakeTerm]]);
+
+    bridge.stop();
+    bridge = freshBridge();
+    let s2 = [{ id: 'aaa', name: 'Router A', protocol: 'ssh', host: '10.0.0.1', aiEnabled: true }];
+    const opts = makeMinimalOpts({
+      terminals,
+      loadProfiles:             () => [...s2],
+      saveProfiles:             (p) => { s2 = p; },
+      killSession:              (id) => { killed.push(id); },
+      broadcastProfilesChanged: jest.fn(),
+      port: 0,
+    });
+    bridge.start(opts);
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries++;
+      const p3 = bridge.getPort();
+      const t3 = bridge.getToken();
+      if (p3 > 0 || tries > 30) {
+        clearInterval(iv);
+        const res = await httpDeleteWithBody(p3, '/profiles/Router%20A', t3, { force: true });
+        expect(res.status).toBe(200);
+        expect(killed).toContain('77');
+        expect(s2.length).toBe(0);
+        done();
+      }
+    }, 10);
+  });
+});
+
+// ── runScpTransfer flag building — source contracts ──────────────────────────
+// runScpTransfer is internal (not exported), so assert against the source that
+// SCP transfers reuse buildCommonSSHFlags. That helper adds HostKeyAlgorithms=
+// +ssh-rsa, which dropbear devices (e.g. Lantronix E210) require — without it
+// modern OpenSSH aborts with "no matching host key type found. Their offer:
+// ssh-rsa". The legacy-algorithm coverage itself lives in ssh-flags.test.js.
+
+describe('http-bridge — runScpTransfer reuses buildCommonSSHFlags (legacy ssh-rsa)', () => {
+  let src;
+  beforeAll(() => {
+    src = fs.readFileSync(path.join(__dirname, '../../src/main/http-bridge.js'), 'utf8');
+  });
+
+  test('buildCommonSSHFlags is imported from ssh-utils', () => {
+    expect(src).toMatch(/require\('\.\/ssh-utils'\)[\s\S]{0,200}buildCommonSSHFlags|buildCommonSSHFlags[\s\S]{0,200}require\('\.\/ssh-utils'\)/);
+  });
+
+  test('runScpTransfer spreads buildCommonSSHFlags into the scp args', () => {
+    const fnStart = src.indexOf('async function runScpTransfer');
+    const fnEnd   = src.indexOf('// ── Bridge state', fnStart);
+    const body    = src.slice(fnStart, fnEnd);
+    expect(body).toContain('...buildCommonSSHFlags(');
+  });
+
+  test('runScpTransfer still forces the legacy SCP protocol (-O)', () => {
+    const fnStart = src.indexOf('async function runScpTransfer');
+    const fnEnd   = src.indexOf('// ── Bridge state', fnStart);
+    const body    = src.slice(fnStart, fnEnd);
+    expect(body).toContain("'-O'");
+  });
+
+  test('runScpTransfer resolves pasted PEM text into a temp key for buildCommonSSHFlags', () => {
+    const fnStart = src.indexOf('async function runScpTransfer');
+    const fnEnd   = src.indexOf('// ── Bridge state', fnStart);
+    const body    = src.slice(fnStart, fnEnd);
+    expect(body).toContain('effectiveProfile');
+    expect(body).toMatch(/pemFile:\s*keyPath/);
   });
 });

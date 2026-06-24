@@ -43,7 +43,7 @@ describe('mcp/server.js — source contracts', () => {
     expect(source).toContain('Make sure Prateek-Term is running');
   });
 
-  test('declares all 11 required MCP tools', () => {
+  test('declares all 13 required MCP tools', () => {
     const expectedTools = [
       'list_profiles',
       'list_sessions',
@@ -56,6 +56,8 @@ describe('mcp/server.js — source contracts', () => {
       'upload_file',
       'download_file',
       'list_serial_ports',
+      'add_profile',
+      'remove_profile',
     ];
     for (const tool of expectedTools) {
       expect(source).toContain(`name: '${tool}'`);
@@ -241,5 +243,117 @@ describe('mcp/server.js — tool schema validation', () => {
     );
     expect(connectBlock).toContain('remoteHostname');
     expect(connectBlock).toContain('Connected to');
+  });
+
+  test('connect schema: port is type number (SSH port), not string', () => {
+    // Serial device paths (/dev/tty.usbserial-*) are strings — they must NOT
+    // be declared as type:number or MCP clients will reject them at validation.
+    const startIdx = source.indexOf("name: 'connect'");
+    const endIdx   = source.indexOf("name: 'run_command'");
+    const toolDef  = source.slice(startIdx, endIdx);
+    // port field must be type:number (SSH port)
+    expect(toolDef).toMatch(/port[^}]*type:\s*'number'/);
+  });
+
+  test('connect schema: serialPort is type string (device path)', () => {
+    // Serial port path must be declared as type:string so AI clients can pass
+    // "/dev/tty.usbserial-0001" without schema validation failure.
+    const startIdx = source.indexOf("name: 'connect'");
+    const endIdx   = source.indexOf("name: 'run_command'");
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toMatch(/serialPort[^}]*type:\s*'string'/);
+  });
+
+  test('connect handler maps args.serialPort → body.port for bridge', () => {
+    // The HTTP bridge expects body.port for the serial device path.
+    // The MCP schema uses args.serialPort (string) — handler must remap it.
+    const connectBlock = source.slice(
+      source.indexOf("case 'connect'"),
+      source.indexOf("case 'run_command'")
+    );
+    expect(connectBlock).toContain('args.serialPort');
+    expect(connectBlock).toMatch(/args\.serialPort.*body\.port|body\.port.*args\.serialPort/s);
+  });
+
+  // ── add_profile schema ────────────────────────────────────────────────────
+
+  test('add_profile tool is declared', () => {
+    expect(source).toContain("name: 'add_profile'");
+  });
+
+  test('add_profile requires name field', () => {
+    const startIdx = source.indexOf("name: 'add_profile'");
+    const endIdx   = source.indexOf("name: 'remove_profile'");
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toContain("required: ['name']");
+  });
+
+  test('add_profile schema includes protocol enum with ssh, serial, local, telnet, ftp', () => {
+    const startIdx = source.indexOf("name: 'add_profile'");
+    const endIdx   = source.indexOf("name: 'remove_profile'");
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toContain("'ssh'");
+    expect(toolDef).toContain("'serial'");
+    expect(toolDef).toContain("'local'");
+    expect(toolDef).toContain("'telnet'");
+    expect(toolDef).toContain("'ftp'");
+  });
+
+  test('add_profile schema includes aiEnabled boolean property', () => {
+    const startIdx = source.indexOf("name: 'add_profile'");
+    const endIdx   = source.indexOf("name: 'remove_profile'");
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toMatch(/aiEnabled[\s\S]{0,80}boolean/);
+  });
+
+  test('add_profile handler calls POST /profiles on bridge', () => {
+    const block = source.slice(
+      source.indexOf("case 'add_profile'"),
+      source.indexOf("case 'remove_profile'")
+    );
+    expect(block).toContain("bridgeRequest('POST', '/profiles'");
+  });
+
+  test('add_profile handler reports aiEnabled status in result message', () => {
+    const block = source.slice(
+      source.indexOf("case 'add_profile'"),
+      source.indexOf("case 'remove_profile'")
+    );
+    expect(block).toContain('aiEnabled');
+  });
+
+  // ── remove_profile schema ─────────────────────────────────────────────────
+
+  test('remove_profile tool is declared', () => {
+    expect(source).toContain("name: 'remove_profile'");
+  });
+
+  test('remove_profile requires name field', () => {
+    const startIdx = source.indexOf("name: 'remove_profile'");
+    const endIdx   = source.indexOf("  ],\n}));"); // end of tools list
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toContain("required: ['name']");
+  });
+
+  test('remove_profile schema includes force boolean property', () => {
+    const startIdx = source.indexOf("name: 'remove_profile'");
+    const endIdx   = source.indexOf("  ],\n}));");
+    const toolDef  = source.slice(startIdx, endIdx);
+    expect(toolDef).toMatch(/force[\s\S]{0,80}boolean/);
+  });
+
+  test('remove_profile handler calls DELETE /profiles/:name on bridge', () => {
+    const startIdx = source.indexOf("case 'remove_profile'");
+    const endIdx   = source.indexOf("default:", startIdx);
+    const block    = source.slice(startIdx, endIdx);
+    expect(block).toContain("bridgeRequest('DELETE'");
+    expect(block).toContain('/profiles/');
+  });
+
+  test('remove_profile handler URL-encodes the profile name', () => {
+    const startIdx = source.indexOf("case 'remove_profile'");
+    const endIdx   = source.indexOf("default:", startIdx);
+    const block    = source.slice(startIdx, endIdx);
+    expect(block).toContain('encodeURIComponent');
   });
 });

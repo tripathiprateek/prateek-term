@@ -25,20 +25,33 @@ const fs    = require('fs');
 const os    = require('os');
 
 const PORT             = parseInt(process.env.PRATEEK_TERM_PORT || '29419', 10);
-const TOKEN_PATH       = path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+
+// Cross-platform token path — mirrors Electron's app.getPath('userData')
+function getTokenPath() {
+  switch (process.platform) {
+    case 'darwin':
+      return path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+    case 'win32':
+      return path.join(process.env.APPDATA || os.homedir(), 'prateek-term', 'mcp-token');
+    default: // linux + others
+      return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'prateek-term', 'mcp-token');
+  }
+}
+const TOKEN_PATH        = getTokenPath();
 const TOKEN_PATH_LEGACY = path.join(os.homedir(), '.prateek-term.mcp-token');
 
 // ── Bridge HTTP client ───────────────────────────────────────────────────────
 
 function readToken() {
-  // Try new path first, fall back to legacy for older installs
+  // Try new platform-specific path first, fall back to legacy home-dir token
   const p = fs.existsSync(TOKEN_PATH) ? TOKEN_PATH
           : fs.existsSync(TOKEN_PATH_LEGACY) ? TOKEN_PATH_LEGACY
           : null;
   if (!p) {
     throw new Error(
-      'Prateek-Term auth token not found. ' +
-      'Make sure Prateek-Term is running and MCP is enabled in Settings.'
+      'Prateek-Term auth token not found.\n' +
+      `Tried:\n  ${TOKEN_PATH}\n  ${TOKEN_PATH_LEGACY}\n` +
+      'Make sure Prateek-Term is running and MCP is enabled in Settings → MCP.'
     );
   }
   return fs.readFileSync(p, 'utf8').trim();
@@ -139,7 +152,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           profileName: { type: 'string', description: 'Name of a saved AI-accessible profile (from list_profiles).' },
           protocol:    { type: 'string', enum: ['local', 'ssh', 'serial'], description: 'Protocol for inline connections (default: local).' },
           host:        { type: 'string', description: 'Hostname for inline SSH (no credentials accepted — use a saved profile instead).' },
-          port:        { type: 'number', description: 'Serial port path (e.g. /dev/tty.usbserial-0001) or SSH port.' },
+          port:        { type: 'number', description: 'SSH port number (default: 22).' },
+          serialPort:  { type: 'string', description: 'Serial device path for serial connections (e.g. /dev/tty.usbserial-0001). Use list_serial_ports to discover available ports.' },
           baudRate:    { type: 'number', description: 'Baud rate for serial connections (default: 115200).' },
         },
         required: [],
@@ -236,6 +250,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: 'List available serial ports on the machine.',
       inputSchema: { type: 'object', properties: {}, required: [] },
     },
+    {
+      name: 'add_profile',
+      description: 'Create and save a new device connection profile in Prateek-Term. The profile is persisted immediately and the sidebar refreshes automatically. Note: aiEnabled defaults to false — set it to true to make the profile accessible to MCP tools.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name:      { type: 'string',  description: 'Unique display name for the profile (required).' },
+          protocol:  { type: 'string',  enum: ['ssh', 'serial', 'local', 'telnet', 'ftp'], description: 'Connection protocol (default: ssh).' },
+          host:      { type: 'string',  description: 'Hostname or IP address (required for ssh, telnet, ftp).' },
+          port:      { type: 'number',  description: 'Port number (default: 22 for SSH).' },
+          username:  { type: 'string',  description: 'Login username.' },
+          authType:  { type: 'string',  enum: ['password', 'key', 'none'], description: 'Authentication type (default: password).' },
+          password:  { type: 'string',  description: 'Password (stored in plaintext, same as existing profiles).' },
+          pemFile:   { type: 'string',  description: 'Absolute path to an identity file (.pem/.key) on the Mac.' },
+          tags:      { type: 'array',   items: { type: 'string' }, description: 'Tags for grouping (e.g. ["ai"] to show in list_profiles).' },
+          aiEnabled: { type: 'boolean', description: 'Allow MCP tools to connect via this profile (default: false).' },
+        },
+        required: ['name'],
+      },
+    },
+    {
+      name: 'remove_profile',
+      description: 'Delete a saved device profile from Prateek-Term by name. If the profile has active terminal sessions, the call fails unless force is set to true.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name:  { type: 'string',  description: 'Exact name of the profile to remove.' },
+          force: { type: 'boolean', description: 'If true, kill any active sessions for this profile before removing (default: false).' },
+        },
+        required: ['name'],
+      },
+    },
   ],
 }));
 
@@ -277,7 +323,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.profileName) body.profileName = args.profileName;
         if (args.protocol)    body.protocol    = args.protocol;
         if (args.host)        body.host        = args.host;
-        if (args.port)        body.port        = args.port;
+        if (args.port)        body.port        = args.port;        // SSH: numeric port
+        if (args.serialPort)  body.port        = args.serialPort; // Serial: device path (bridge field is also 'port')
         if (args.baudRate)    body.baudRate    = args.baudRate;
         const result = await bridgeRequest('POST', '/sessions', body);
         let msg = `Session opened. ID: ${result.id}`;
@@ -353,6 +400,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (ports.length === 0) return textResult('No serial ports found.');
         const summary = ports.map(p => `• ${p.path}${p.manufacturer ? ` (${p.manufacturer})` : ''}`).join('\n');
         return textResult(`Available serial ports:\n${summary}`);
+      }
+
+      case 'add_profile': {
+        const { name, protocol, host, port, username, authType, password, pemFile, tags, aiEnabled } = args;
+        const body = { name, protocol, host, port, username, authType, password, pemFile, tags, aiEnabled };
+        // Strip undefined keys so bridge uses its own defaults
+        Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+        const result = await bridgeRequest('POST', '/profiles', body);
+        const p = result.profile;
+        let msg = `Profile '${p.name}' created.`;
+        msg += `\nProtocol: ${p.protocol}`;
+        if (p.host) msg += `  Host: ${p.username ? p.username + '@' : ''}${p.host}${p.port && p.port !== 22 ? ':' + p.port : ''}`;
+        msg += `\nAI-accessible: ${p.aiEnabled ? 'yes' : 'no (set aiEnabled:true to allow MCP access)'}`;
+        return textResult(msg);
+      }
+
+      case 'remove_profile': {
+        const { name, force } = args;
+        const result = await bridgeRequest('DELETE', `/profiles/${encodeURIComponent(name)}`, force ? { force: true } : {});
+        return textResult(`Profile '${result.removed.name}' removed.`);
       }
 
       default:

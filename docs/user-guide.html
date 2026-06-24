@@ -733,7 +733,7 @@
 <!-- ╚══════════════════════════════╝ -->
 <div class="page-wrap">
   <div class="hero">
-    <div class="hero-badge">User Guide · v1.2.1</div>
+    <div class="hero-badge">User Guide · v1.4.0</div>
     <h1>Prateek-Term</h1>
     <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
   </div>
@@ -745,6 +745,8 @@
       <li><a href="#tabs">Tabs &amp; Local Terminals</a></li>
       <li><a href="#new-device">Adding a New Device</a></li>
       <li><a href="#ssh">SSH Connections</a></li>
+      <li><a href="#jump-host">Jump Host (ProxyJump)</a></li>
+      <li><a href="#port-forwarding">Port Forwarding</a></li>
       <li><a href="#serial">Serial / COM Devices</a></li>
       <li><a href="#tags">Tags &amp; Filtering</a></li>
       <li><a href="#tab-groups">Tab Groups</a></li>
@@ -870,6 +872,15 @@
           <li><span class="step-num">3</span>Fill in Protocol, Label, Host, Username, and Auth method.</li>
           <li><span class="step-num">4</span>Click <strong>Save</strong> to persist, or <strong>Connect</strong> to save &amp; open a terminal immediately.</li>
         </ul>
+        <h4 style="margin-top:14px; font-size:13px; color:var(--text-secondary,#cdd6f4);">Smart Save Button</h4>
+        <p style="font-size:13px; color:var(--text-muted,#7f849c); margin-bottom:8px;">
+          The save button adapts to context — no accidental overwrites, no hunting for a dismiss button.
+        </p>
+        <ul style="font-size:13px; color:var(--text-muted,#7f849c); padding-left:18px; line-height:1.8;">
+          <li><strong style="color:var(--text-secondary,#cdd6f4);">× Close</strong> — shown when opening an existing profile with no edits yet. Clicking dismisses the panel without saving.</li>
+          <li><strong style="color:var(--text-secondary,#cdd6f4);">💾 Save</strong> — appears automatically on the first keystroke or field change, indicating unsaved edits.</li>
+          <li><strong style="color:#a6e3a1;">✓ Saved</strong> — flashes green for 2 s after a successful save, then reverts to <em>Close</em>.</li>
+        </ul>
       </div>
     </div>
   </div>
@@ -944,7 +955,255 @@
 
     <div class="tip">
       <span class="tip-icon">💡</span>
-      <p><strong>Drag-and-drop SCP upload:</strong> while connected via SSH, drag files from Finder onto the terminal window. Prateek-Term detects the remote working directory and uploads automatically.</p>
+      <p><strong>Drag-and-drop SCP upload:</strong> while connected via SSH, drag files from Finder onto the terminal window. Prateek-Term tracks the remote shell's current directory via OSC 7 — drag-drop SCP uploads land in your active remote directory automatically.</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       3b — JUMP HOST (PROXYJUMP)
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="jump-host">
+    <div class="section-label">03b</div>
+    <h2>Jump Host (ProxyJump)</h2>
+    <p class="section-intro">Reach devices that are only accessible through an intermediary SSH host. Configure a jump hop directly in the SSH profile — no manual <code>ssh -J</code> flags needed.</p>
+
+    <div class="feature-card">
+      <div class="feature-demo" style="min-height:220px; flex-direction:column; gap:12px;">
+        <div class="mock-window" style="max-width:560px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">SSH Profile — Jump Host</div>
+          </div>
+          <div class="mock-form" style="padding:14px; gap:8px;">
+            <!-- Network diagram -->
+            <div style="background:#1e1e2e; border:1px solid #3a3a5c; border-radius:8px; padding:10px 14px; font-family:monospace; font-size:12px; color:#7f849c; text-align:center; letter-spacing:0.02em;">
+              <span style="color:#89b4fa;">Mac</span>
+              <span style="color:#3a3a5c;"> ──ssh──▶ </span>
+              <span style="color:#a6e3a1;">Jump Host</span>
+              <span style="color:#6c7086;"> (192.168.1.96)</span>
+              <span style="color:#3a3a5c;"> ──ssh──▶ </span>
+              <span style="color:#fab387;">Target</span>
+              <span style="color:#6c7086;"> (192.168.2.120)</span>
+            </div>
+            <!-- Jump host fields -->
+            <div style="border:1px solid #3a3a5c; border-radius:8px; padding:10px; background:#1e1e2e;">
+              <div style="color:#cba6f7; font-size:11px; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.06em;">Jump Host</div>
+              <div class="mock-row">
+                <div class="mock-field" style="flex:2">
+                  <div class="mock-label">Hostname / IP</div>
+                  <div class="mock-input">192.168.1.96</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Port</div>
+                  <div class="mock-input">22</div>
+                </div>
+                <div class="mock-field" style="flex:1">
+                  <div class="mock-label">Username</div>
+                  <div class="mock-input">pi</div>
+                </div>
+              </div>
+              <div class="mock-field">
+                <div class="mock-label">Auth Mode</div>
+                <div class="mock-input" style="color:#cba6f7;">Key File — ~/.ssh/id_rsa_jump</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Three auth modes for the jump hop</h3>
+        <ul class="steps">
+          <li><span class="step-num">1</span><strong>Agent / Ask</strong> — use the running SSH agent or fall back to an interactive password prompt.</li>
+          <li><span class="step-num">2</span><strong>Key File</strong> — specify a dedicated identity file for the jump host; the target host uses its own separate auth.</li>
+          <li><span class="step-num">3</span><strong>Password</strong> — supply a password for the jump host; requires <code>sshpass</code> to be installed (<code>brew install sshpass</code>).</li>
+        </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">⚠️</span>
+          <p><strong>Mutually exclusive with Cloudflare Access.</strong> Enabling Jump Host automatically disables the Cloudflare Access toggle, and vice versa.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════
+       03c — PORT FORWARDING
+  ════════════════════════════════════════════ -->
+  <div class="divider"></div>
+  <div class="section" id="port-forwarding">
+    <div class="section-label">03c</div>
+    <h2>Port Forwarding</h2>
+    <p class="section-intro">Create SSH tunnels that expose remote services locally — or expose local services on the remote host. Add any number of rules per profile; they activate automatically on connect.</p>
+
+    <div class="feature-card">
+      <div class="feature-demo" style="min-height:260px; flex-direction:column; gap:12px;">
+        <div class="mock-window" style="max-width:580px;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">SSH Profile — Port Forwarding</div>
+          </div>
+          <div class="mock-form" style="padding:14px; gap:10px;">
+            <!-- Dynamic rule -->
+            <div style="display:flex; align-items:center; gap:8px; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:6px; padding:8px 10px; font-size:12px; font-family:monospace;">
+              <span style="color:#a6e3a1;">✓</span>
+              <span style="background:#313244; color:#cba6f7; border-radius:4px; padding:2px 7px; font-size:11px;">SOCKS5 Dynamic</span>
+              <span style="color:#7f849c;">Port</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">1080</span>
+              <span style="color:#6c7086; font-size:11px; margin-left:4px;">→ SOCKS5 proxy on 127.0.0.1:1080</span>
+            </div>
+            <!-- Local rule -->
+            <div style="display:flex; align-items:center; gap:8px; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:6px; padding:8px 10px; font-size:12px; font-family:monospace;">
+              <span style="color:#a6e3a1;">✓</span>
+              <span style="background:#313244; color:#89b4fa; border-radius:4px; padding:2px 7px; font-size:11px;">Local Forward</span>
+              <span style="color:#7f849c;">Port</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">8080</span>
+              <span style="color:#3a3a5c;">→</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">192.168.2.1</span>
+              <span style="color:#3a3a5c;">:</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">80</span>
+            </div>
+            <!-- Remote rule -->
+            <div style="display:flex; align-items:center; gap:8px; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:6px; padding:8px 10px; font-size:12px; font-family:monospace;">
+              <span style="color:#6c7086;">○</span>
+              <span style="background:#313244; color:#fab387; border-radius:4px; padding:2px 7px; font-size:11px;">Remote Forward</span>
+              <span style="color:#7f849c;">Port</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">9000</span>
+              <span style="color:#3a3a5c;">→</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">localhost</span>
+              <span style="color:#3a3a5c;">:</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">3000</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="feature-desc">
+        <h3>Three rule types</h3>
+        <ul class="steps">
+          <li><span class="step-num">1</span><strong>Dynamic (SOCKS5)</strong> — Opens a SOCKS5 proxy on the given local port. Route any app or browser through it to access hosts only reachable from the SSH server. Point Chrome to <code>127.0.0.1:&lt;port&gt;</code>.</li>
+          <li><span class="step-num">2</span><strong>Local Forward</strong> — Binds a local port and tunnels connections to a remote <code>host:port</code> via the SSH server. Access a router admin page, a database, or any service on the remote network as if it were on your Mac.</li>
+          <li><span class="step-num">3</span><strong>Remote Forward</strong> — Binds a port on the SSH server and forwards connections back to a local address. Lets the remote host (or others who can reach it) connect to a service running on your Mac.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SOCKS5 + Chrome -->
+    <div class="feature-card" style="margin-top:24px;">
+      <div class="feature-desc" style="max-width:100%;">
+        <h3>Using Dynamic (SOCKS5) with Chrome</h3>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Add a <strong>Dynamic</strong> rule on any free local port (e.g. <code>1080</code>) and connect the profile.</li>
+          <li><span class="step-num">2</span>The <strong>Launch Chrome via this proxy</strong> button appears in the Port Forwarding section. Click it — Chrome opens as a fully isolated instance with all traffic routed through the tunnel.</li>
+          <li><span class="step-num">3</span>Navigate to any device on the remote network by IP — <code>https://192.168.2.110/</code>, <code>http://192.168.2.1/</code>, etc.</li>
+        </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">💡</span>
+          <p>Chrome requires a <strong>separate process</strong> to apply proxy flags — the button always launches an isolated Chrome instance with its own profile so your regular browsing is unaffected.</p>
+        </div>
+
+        <h3 style="margin-top:20px;">Using Local Forward to reach a remote web UI</h3>
+        <ul class="steps">
+          <li><span class="step-num">1</span>Add a <strong>Local</strong> rule: local port <code>8080</code> → <code>192.168.2.1:80</code> (replace with the target device IP and port).</li>
+          <li><span class="step-num">2</span>Connect the profile.</li>
+          <li><span class="step-num">3</span>Open <code>http://localhost:8080</code> in any browser — traffic arrives at the remote device as if sent by the SSH server.</li>
+        </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">⚠️</span>
+          <p>Rules are applied when the SSH connection is established. Toggling a rule or changing its values requires reconnecting the tab to take effect.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Proxy Filter -->
+    <div class="feature-card" style="margin-top:24px;">
+      <div class="feature-demo" style="min-height:280px; flex-direction:column; gap:16px; align-items:flex-start;">
+        <div class="mock-window" style="max-width:600px; width:100%;">
+          <div class="mock-titlebar">
+            <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+            <div class="mock-title">SSH Profile — Dynamic Rule with Filter</div>
+          </div>
+          <div class="mock-form" style="padding:14px; gap:10px;">
+
+            <!-- Rule row -->
+            <div style="display:flex; align-items:center; gap:8px; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:6px; padding:8px 10px; font-size:12px; font-family:monospace;">
+              <span style="color:#a6e3a1;">✓</span>
+              <span style="background:#313244; color:#cba6f7; border-radius:4px; padding:2px 7px; font-size:11px;">SOCKS5 Dynamic</span>
+              <span style="color:#7f849c;">Port</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">1080</span>
+              <span style="color:#6c7086; font-size:11px; margin-left:auto;">×</span>
+            </div>
+
+            <!-- Filter row — Include mode active -->
+            <div style="display:flex; align-items:center; gap:8px; padding:6px 10px 8px; border-top:1px solid #2a2a3c; flex-wrap:wrap;">
+              <span style="color:#6c7086; font-size:11px;">Filter</span>
+              <div style="display:flex; gap:4px;">
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #3a3a5c; color:#7f849c;">All traffic</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:#89b4fa; color:#1e1e2e; border:1px solid #89b4fa;">Include only</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #3a3a5c; color:#7f849c;">Exclude</span>
+              </div>
+              <span style="font-size:11px; color:#cdd6f4; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:4px; padding:2px 10px; flex:1; font-family:monospace;">192.168.2.0/24, *.work.example.com</span>
+            </div>
+
+            <!-- Filter row — Exclude mode -->
+            <div style="display:flex; align-items:center; gap:8px; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:6px; padding:8px 10px; font-size:12px; font-family:monospace; margin-top:4px;">
+              <span style="color:#a6e3a1;">✓</span>
+              <span style="background:#313244; color:#cba6f7; border-radius:4px; padding:2px 7px; font-size:11px;">SOCKS5 Dynamic</span>
+              <span style="color:#7f849c;">Port</span>
+              <span style="color:#cdd6f4; background:#313244; border-radius:4px; padding:2px 7px;">9050</span>
+              <span style="color:#6c7086; font-size:11px; margin-left:auto;">×</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; padding:6px 10px 8px; border-top:1px solid #2a2a3c; flex-wrap:wrap;">
+              <span style="color:#6c7086; font-size:11px;">Filter</span>
+              <div style="display:flex; gap:4px;">
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #3a3a5c; color:#7f849c;">All traffic</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #3a3a5c; color:#7f849c;">Include only</span>
+                <span style="font-size:11px; padding:2px 8px; border-radius:4px; background:#89b4fa; color:#1e1e2e; border:1px solid #89b4fa;">Exclude</span>
+              </div>
+              <span style="font-size:11px; color:#cdd6f4; background:#1e1e2e; border:1px solid #3a3a5c; border-radius:4px; padding:2px 10px; flex:1; font-family:monospace;">192.168.1.0/24</span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-desc">
+        <h3>Proxy Filter — Include or Exclude hosts</h3>
+        <p style="margin-bottom:12px; color:var(--text-muted, #7f849c); font-size:14px;">Each Dynamic (SOCKS5) rule has a <strong>Filter</strong> row that controls which hosts Chrome routes through the tunnel when you click <em>Launch Chrome via this proxy</em>.</p>
+        <ul class="steps">
+          <li>
+            <span class="step-num">1</span>
+            <strong>All traffic</strong> (default) — Every request goes through the SOCKS5 tunnel. Only loopback addresses (<code>127.x.x.x</code>) bypass it. Use this when you need full network access via the remote host.
+          </li>
+          <li>
+            <span class="step-num">2</span>
+            <strong>Include only</strong> — Enter a comma-separated list of hosts. <em>Only</em> those addresses are tunneled; all other traffic (internet, local LAN) goes direct. Implemented via a PAC script — no performance overhead for non-matching hosts.
+            <br><br>
+            <code style="font-size:12px; background:#1e1e2e; padding:4px 8px; border-radius:4px; display:inline-block; margin-top:4px;">192.168.2.0/24, *.corp.example.com, 10.0.0.5</code>
+          </li>
+          <li>
+            <span class="step-num">3</span>
+            <strong>Exclude</strong> — All traffic goes through the tunnel <em>except</em> the listed hosts, which connect directly. Useful when you want to keep normal internet traffic local but tunnel everything on the remote network.
+            <br><br>
+            <code style="font-size:12px; background:#1e1e2e; padding:4px 8px; border-radius:4px; display:inline-block; margin-top:4px;">192.168.1.0/24, myprinter.local</code>
+          </li>
+        </ul>
+
+        <div class="tip" style="margin-top:16px;">
+          <span class="tip-icon">🌐</span>
+          <div>
+            <p><strong>Supported entry formats</strong> (comma-separated, any combination):</p>
+            <ul style="margin:6px 0 0 16px; font-size:13px; line-height:1.8;">
+              <li><code>192.168.2.0/24</code> — CIDR subnet (e.g. /8, /16, /24, /32)</li>
+              <li><code>*.company.com</code> — Wildcard domain pattern</li>
+              <li><code>10.0.0.5</code> — Exact IP address</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">💡</span>
+          <p>The filter setting is saved with the profile. Each Dynamic rule has its own independent filter, so you can run two tunnels simultaneously — one for include-only access to a remote subnet and one for exclude-based browsing.</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1526,11 +1785,11 @@
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">1</span>Enable MCP in Settings &#8594; <strong>AI/MCP</strong> tab.</li>
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">2</span>Click <strong>Register with AI Clients</strong> to auto-configure Claude.</li>
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">3</span>Start a new Claude session — prateek-term tools appear automatically.</li>
-          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">4</span>Tag any profile as <strong>"ai"</strong> to make it accessible to AI agents.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">4</span>Click the <strong>AI</strong> toggle on any profile in the sidebar to enable AI/MCP access for that profile (grey = off, green = on).</li>
         </ul>
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">🔒</span>
-          <p><strong>Security:</strong> Only profiles tagged <strong>"ai"</strong> are visible to AI agents. Credentials are never exposed — the bridge resolves connections internally.</p>
+          <p><strong>Security:</strong> Only profiles with the <strong>AI toggle enabled</strong> (green) are visible to AI agents. Credentials are never exposed — the bridge resolves connections internally.</p>
         </div>
       </div>
     </div>
@@ -1576,6 +1835,16 @@
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">&#128268;</span>
           <p><strong>Standalone server:</strong> When registered via the Settings panel, Prateek-Term copies the MCP server to <code>~/.prateek-term/mcp/</code> with its own dependencies, ensuring it works independently of the app bundle.</p>
+        </div>
+        <div class="tip" style="margin-top:10px; background:rgba(166,227,161,0.06); border-color:rgba(166,227,161,0.2);">
+          <span class="tip-icon">&#128273;</span>
+          <p><strong>Auth token location</strong> — the MCP bridge authenticates via a token file written when MCP is first enabled. Location depends on platform:</p>
+          <ul style="margin:6px 0 0 4px; padding-left:16px; line-height:1.8; font-size:13px;">
+            <li><strong>macOS:</strong> <code>~/Library/Application Support/prateek-term/mcp-token</code></li>
+            <li><strong>Linux:</strong> <code>~/.config/prateek-term/mcp-token</code> (or <code>$XDG_CONFIG_HOME/prateek-term/mcp-token</code>)</li>
+            <li><strong>Windows:</strong> <code>%APPDATA%\prateek-term\mcp-token</code></li>
+          </ul>
+          <p style="margin-top:6px;">If the MCP server reports <em>"auth token not found"</em>, make sure Prateek-Term has been launched at least once with MCP enabled in Settings → AI/MCP.</p>
         </div>
       </div>
     </div>
@@ -1779,7 +2048,7 @@
 
   <!-- ── Footer ── -->
   <div class="footer">
-    <p>Prateek-Term v1.2.1 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p>Prateek-Term v1.4.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
     <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
   </div>
 

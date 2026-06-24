@@ -190,13 +190,29 @@ describe('app.js — OSC 7 injection helper is reusable for reconnect', () => {
 });
 
 describe('app.js — injection is hidden from terminal + history', () => {
+  test('saves full terminal state with stty -g before disabling echo', () => {
+    // stty -g captures ALL terminal flags (ICANON, ECHO, readline settings).
+    // Restoring the saved state in phase 2 preserves ctrl+r / reverse-i-search.
+    expect(appSource).toMatch(/_PT_STTY=\$\(stty -g 2>\/dev\/null\)/);
+  });
+
   test('disables shell echo before sending setup (stty -echo)', () => {
     // Phase 1: stty -echo suppresses echo of the real setup command
     expect(appSource).toMatch(/stty -echo 2>\/dev\/null/);
   });
 
-  test('re-enables echo after setup (stty echo)', () => {
-    expect(appSource).toMatch(/stty echo 2>\/dev\/null/);
+  test('restores exact terminal state after setup via stty "${_PT_STTY:-echo}"', () => {
+    // stty "${_PT_STTY:-echo}" is a single real command:
+    //   • _PT_STTY set   → passes the full saved termios blob (restores ALL flags
+    //     including readline ICANON that ctrl+r depends on)
+    //   • _PT_STTY unset → expands to the word "echo" → `stty echo` (busybox fallback)
+    // The previous `${_PT_STTY:+...}` form was a parameter EXPANSION not an
+    // execution — it produced a string but never ran it, so state was never restored.
+    expect(appSource).toMatch(/stty "\$\{_PT_STTY:-echo\}" 2>\/dev\/null/);
+  });
+
+  test('unsets _PT_STTY after restore to avoid polluting shell env', () => {
+    expect(appSource).toMatch(/unset _PT_STTY/);
   });
 
   test('erases visible stty -echo line with ANSI cursor-up + clear', () => {
@@ -205,10 +221,9 @@ describe('app.js — injection is hidden from terminal + history', () => {
     expect(appSource).toMatch(/\\\\033\[2F\\\\033\[0J/);
   });
 
-  test('leading space before stty -echo so bash/zsh ignorespace skips history', () => {
-    // ` stty -echo` or ' stty -echo` (leading space) → HISTCONTROL=ignorespace / HIST_IGNORE_SPACE
-    // Accept either backtick or single-quote JS string delimiter
-    expect(appSource).toMatch(/['`]\s+stty -echo 2>\/dev\/null/);
+  test('leading space before _PT_STTY so bash/zsh ignorespace skips history', () => {
+    // Phase 1 starts with a space then `_PT_STTY=...` → HISTCONTROL=ignorespace skips it
+    expect(appSource).toMatch(/['`]\s+_PT_STTY=\$\(stty -g/);
   });
 
   test('phase-2 setup ALSO has leading space for history skip', () => {

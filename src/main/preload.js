@@ -42,6 +42,11 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   // Profile operations
   loadProfiles: () => ipcRenderer.invoke('profiles:load'),
   saveProfiles: (profiles) => ipcRenderer.invoke('profiles:save', profiles),
+  onProfilesChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('profiles:changed', listener);
+    return () => ipcRenderer.removeListener('profiles:changed', listener);
+  },
 
   // Settings
   loadSettings: () => ipcRenderer.invoke('settings:load'),
@@ -60,6 +65,7 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   openFileDialog: (options) => ipcRenderer.invoke('dialog:openFile', options),
   selectDirectoryDialog: (options) =>
     ipcRenderer.invoke('dialog:selectDirectory', options),
+  openChromeWithProxy: (port, filterMode, filterList) => ipcRenderer.invoke('shell:openChromeProxy', { port, filterMode, filterList }),
 
   // Key operations
   saveTempKey: (pemContent) => ipcRenderer.invoke('key:saveTempKey', pemContent),

@@ -19,7 +19,7 @@
 
 ## The first macOS terminal with native MCP support
 
-Prateek-Term is more than a terminal emulator. It exposes **11 MCP tools** that let AI agents (Claude Desktop, Claude Code, or any MCP client) connect to SSH devices, run commands, transfer files, and manage sessions — all through a standardized protocol.
+Prateek-Term is more than a terminal emulator. It exposes **13 MCP tools** that let AI agents (Claude Desktop, Claude Code, or any MCP client) connect to SSH devices, run commands, transfer files, add/remove profiles, and manage sessions — all through a standardized protocol.
 
 No plugins. No wrappers. Built in.
 
@@ -36,20 +36,25 @@ No plugins. No wrappers. Built in.
 
 ### SSH / Serial / File Transfer
 - **SSH** with PEM/identity file support, custom SSH options, ssh-config import/export
+- **Jump Host (ProxyJump)** — tunnel through an intermediary SSH host (agent, key, or password auth)
+- **Cloudflare Access** — zero-trust SSH tunnelling via `cloudflared`
+- **Port forwarding** — local / remote / dynamic (SOCKS5), with one-click **Launch Chrome via this proxy** and per-rule Include/Exclude host filtering
 - **Telnet** with configurable host, port, and options
 - **SFTP** with PEM support and drag-and-drop file upload from Finder
-- **SCP** with legacy protocol support (`-O` flag) for embedded/BusyBox devices
+- **SCP** with legacy protocol support (`-O` flag, `ssh-rsa`) for embedded/BusyBox/dropbear devices
 - **FTP** interactive client
 - **Serial** with configurable baud rate, data bits, stop bits, parity
 
 ### Connection Manager
 - Save, edit, and organize connection profiles per protocol
+- **Collapsible sidebar** (`⌘B`) — state persists across restarts
 - **Custom Actions** — define per-profile scripts that execute instantly in the terminal
 - Export / Import profiles and actions as JSON
+- **Per-profile AI toggle** — click the AI chip on any sidebar profile to grant or revoke AI/MCP access; no special tags needed
 
 ### MCP for AI Agents
 
-11 tools available over stdio transport:
+13 tools available over stdio transport:
 
 | Tool | Description |
 |------|-------------|
@@ -64,6 +69,8 @@ No plugins. No wrappers. Built in.
 | `upload_file` | Upload a local file to a remote host via SCP |
 | `download_file` | Download a remote file to local via SCP |
 | `list_serial_ports` | List available serial ports on the host |
+| `add_profile` | Create a new connection profile (AI access off by default) |
+| `remove_profile` | Delete a profile (refuses if sessions active unless `force`) |
 
 ---
 
@@ -78,8 +85,9 @@ Download the latest DMG from [Releases](https://github.com/tripathiprateek/prate
 1. Open Prateek-Term
 2. Go to **Settings** (gear icon) and click **Register MCP Server**
 3. Restart Claude Desktop or Claude Code
+4. Click the **AI** toggle on any profile in the sidebar to grant AI/MCP access to it (grey = off, green = on)
 
-That's it. Claude can now see and use Prateek-Term's MCP tools.
+That's it. Claude can now connect to profiles with AI access enabled.
 
 ### Example: AI-driven SSH session
 
@@ -98,7 +106,7 @@ Claude: "Connect to my staging server and check disk usage"
 ```bash
 npm install          # install dependencies
 npm start            # run in development mode
-npm test             # run test suite (354 tests)
+npm test             # run test suite (633 tests)
 npm run lint         # lint source
 ```
 

@@ -82,8 +82,8 @@ describe('app.js — restoreSession injects cd to saved path', () => {
   });
 
   test('SSH delay ≥ 2000ms so OSC 7 inject (~1800ms) finishes first', () => {
-    // protocol === 'local' ? 500 : 2200
-    expect(appSource).toMatch(/protocol === 'local' \? 500 : 2200/);
+    // protocol === 'local' ? 500 : 2800 (2800ms covers OSC inject phase 1+2 ~2200ms)
+    expect(appSource).toMatch(/protocol === 'local' \? 500 : 2[0-9]{3}/);
   });
 
   test('pre-seeds _cwdPath (local) or _remoteCwd (ssh) for immediate drag-drop', () => {

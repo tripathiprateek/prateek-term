@@ -183,6 +183,55 @@ function buildCloudflareProxyFlags(cloudflaredBin, hostname) {
   return ['-o', `ProxyCommand=${bin} access ssh --hostname %h`];
 }
 
+/**
+ * Build the ProxyCommand flag for SSH jump-host tunnelling.
+ * Returns ['-o', 'ProxyCommand=...'] or [] if proxyEnabled is false/absent.
+ *
+ * The inner SSH command always uses StrictHostKeyChecking=no +
+ * UserKnownHostsFile=/dev/null because embedded devices (routers, RPi on
+ * eth0) frequently have changing host keys that would block unattended tunnels.
+ *
+ * Auth precedence:
+ *   1. proxyPemFile → ssh -i KEY -o IdentitiesOnly=yes ...
+ *   2. proxyPassword → sshpass -p PASS ssh ...  (requires sshpass on PATH)
+ *   3. none / agent  → ssh ...  (uses ssh-agent or interactive prompt)
+ */
+function buildJumpHostProxyCommand(profile) {
+  if (!profile.proxyEnabled) return [];
+  const jHost = profile.proxyHost || '';
+  if (!jHost) return [];
+
+  const jPort = profile.proxyPort && profile.proxyPort !== 22
+    ? ['-p', String(profile.proxyPort)] : [];
+  const jUser = profile.proxyUsername
+    ? `${profile.proxyUsername}@${jHost}`
+    : jHost;
+  const strictOpts = [
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+  ];
+
+  let innerParts;
+  if (profile.proxyPemFile) {
+    const resolvedPem = String(profile.proxyPemFile)
+      .replace(/^~(?=$|\/|\\)/, process.env.HOME || '~');
+    innerParts = [
+      'ssh', '-i', resolvedPem, '-o', 'IdentitiesOnly=yes',
+      ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
+    ];
+  } else if (profile.proxyPassword) {
+    const sshpassPath = findSshpass() || 'sshpass';
+    innerParts = [
+      sshpassPath, '-p', profile.proxyPassword,
+      'ssh', ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
+    ];
+  } else {
+    innerParts = ['ssh', ...strictOpts, ...jPort, '-W', '%h:%p', jUser];
+  }
+
+  return ['-o', `ProxyCommand=${innerParts.join(' ')}`];
+}
+
 // ---------------------------------------------------------------------------
 // SSH flag building
 // ---------------------------------------------------------------------------
@@ -262,11 +311,26 @@ function buildSSHCommand(profile) {
     args.push('-p', String(profile.port));
   }
 
-  // Cloudflare Access: inject ProxyCommand so SSH tunnels through cloudflared.
-  // The binary path is stored in profile.cloudflaredPath (null = use PATH).
+  // ProxyCommand — mutually exclusive; Cloudflare Access takes priority.
+  // Only one ProxyCommand can be active (SSH ignores duplicates unpredictably).
   if (profile.cloudflareAccess) {
-    const cfFlags = buildCloudflareProxyFlags(profile.cloudflaredPath || null);
-    args.push(...cfFlags);
+    args.push(...buildCloudflareProxyFlags(profile.cloudflaredPath || null));
+  } else if (profile.proxyEnabled) {
+    args.push(...buildJumpHostProxyCommand(profile));
+  }
+
+  // Port forwarding rules
+  if (Array.isArray(profile.portForwards)) {
+    for (const pf of profile.portForwards) {
+      if (!pf.enabled) continue;
+      if (pf.type === 'dynamic' && pf.localPort) {
+        args.push('-D', String(pf.localPort));
+      } else if (pf.type === 'local' && pf.localPort && pf.remoteHost && pf.remotePort) {
+        args.push('-L', `${pf.localPort}:${pf.remoteHost}:${pf.remotePort}`);
+      } else if (pf.type === 'remote' && pf.localPort && pf.remoteHost && pf.remotePort) {
+        args.push('-R', `${pf.remotePort}:${pf.remoteHost}:${pf.localPort}`);
+      }
+    }
   }
 
   const userHost = profile.username
@@ -275,9 +339,17 @@ function buildSSHCommand(profile) {
 
   args.push(userHost);
 
-  // Password injection is handled in the renderer via auto-type (see app.js).
-  // The renderer watches PTY output for "Password:" and sends the password via
-  // sendInput — no sshpass, no SSH_ASKPASS, no PTY nesting issues.
+  // Password injection strategy:
+  //   • No port forwards → PTY auto-type (renderer watches for "Password:" prompt).
+  //   • Port forwards present → use SSH_ASKPASS so auth completes immediately and
+  //     the SOCKS / local / remote listeners bind without waiting for PTY input.
+  //     Without this, -D/-L/-R ports are unavailable until the user interacts with
+  //     the terminal, which defeats the purpose of background tunnels.
+  const hasPortForwards = Array.isArray(profile.portForwards) &&
+    profile.portForwards.some(pf => pf.enabled);
+  if (hasPortForwards && profile.password && !profile.pemFile) {
+    return wrapWithAskpass('ssh', args, profile);
+  }
   return { command: 'ssh', args, env: {}, _cleanupFiles: [] };
 }
 
@@ -286,6 +358,13 @@ function buildSFTPCommand(profile) {
 
   if (profile.port && profile.port !== 22) {
     args.push('-P', String(profile.port)); // SFTP uses -P (uppercase)
+  }
+
+  // ProxyCommand — same mutual-exclusion rule as SSH
+  if (profile.cloudflareAccess) {
+    args.push(...buildCloudflareProxyFlags(profile.cloudflaredPath || null));
+  } else if (profile.proxyEnabled) {
+    args.push(...buildJumpHostProxyCommand(profile));
   }
 
   const userHost = profile.username
@@ -302,6 +381,13 @@ function buildSCPCommand(profile) {
 
   if (profile.port && profile.port !== 22) {
     args.push('-P', String(profile.port)); // SCP uses -P (uppercase)
+  }
+
+  // ProxyCommand — same mutual-exclusion rule as SSH
+  if (profile.cloudflareAccess) {
+    args.push(...buildCloudflareProxyFlags(profile.cloudflaredPath || null));
+  } else if (profile.proxyEnabled) {
+    args.push(...buildJumpHostProxyCommand(profile));
   }
 
   if (profile.scpLegacy)    args.push('-O');
@@ -455,6 +541,40 @@ function profilesToSSHConfig(profiles) {
   return lines.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Chrome SOCKS5 proxy PAC builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a PAC data: URL that routes only the listed hosts through a local
+ * SOCKS5 proxy, returning DIRECT for everything else.
+ *
+ * Supported entry formats (comma-separated in listStr):
+ *   192.168.2.0/24   → isInNet CIDR check
+ *   *.company.com    → shExpMatch wildcard
+ *   10.0.0.5         → exact host== match
+ */
+function buildIncludePacUrl(socksPort, listStr) {
+  const entries = listStr.split(',').map(s => s.trim()).filter(Boolean);
+  const conditions = entries.map(entry => {
+    const cidrMatch = entry.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+    if (cidrMatch) {
+      const bits = parseInt(cidrMatch[2], 10);
+      const mask = Array.from({ length: 4 }, (_, i) =>
+        Math.max(0, Math.min(255, 256 - Math.pow(2, Math.max(0, 8 - Math.max(0, bits - i * 8)))))
+      ).join('.');
+      return `isInNet(host,"${cidrMatch[1]}","${mask}")`;
+    }
+    if (entry.includes('*')) return `shExpMatch(host,"${entry}")`;
+    return `host=="${entry}"`;
+  });
+  const guard = conditions.length
+    ? `if(${conditions.join('||')})return"SOCKS5 127.0.0.1:${socksPort}";`
+    : '';
+  const pac = `function FindProxyForURL(url,host){${guard}return"DIRECT";}`;
+  return `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`;
+}
+
 module.exports = {
   writeAskpassScript,
   wrapWithAskpass,
@@ -471,4 +591,6 @@ module.exports = {
   profilesToSSHConfig,
   findCloudflared,
   buildCloudflareProxyFlags,
+  buildJumpHostProxyCommand,
+  buildIncludePacUrl,
 };

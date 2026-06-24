@@ -10,7 +10,7 @@
  *  - All endpoints (except /health) require an Authorization: Bearer <token>
  *    header. The token is written to ~/Library/Application Support/prateek-term/mcp-token
  *    (mode 0600) on first start and reused across restarts.
- *  - Only profiles tagged "ai" are visible / connectable via the bridge.
+ *  - Only profiles with AI/MCP access toggled on are visible / connectable via the bridge.
  */
 
 const http   = require('http');
@@ -18,8 +18,20 @@ const crypto = require('crypto');
 const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
+const { buildCloudflareProxyFlags, buildJumpHostProxyCommand, buildCommonSSHFlags } = require('./ssh-utils');
 
-const TOKEN_PATH = path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+// Cross-platform token path — mirrors Electron's app.getPath('userData')
+function _getTokenPath() {
+  switch (process.platform) {
+    case 'darwin':
+      return path.join(os.homedir(), 'Library', 'Application Support', 'prateek-term', 'mcp-token');
+    case 'win32':
+      return path.join(process.env.APPDATA || os.homedir(), 'prateek-term', 'mcp-token');
+    default: // linux + others
+      return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'prateek-term', 'mcp-token');
+  }
+}
+const TOKEN_PATH        = _getTokenPath();
 const TOKEN_PATH_LEGACY = path.join(os.homedir(), '.prateek-term.mcp-token');
 const OUTPUT_BUF_MAX = 64 * 1024; // 64 KB ring-buffer per session
 
@@ -194,27 +206,44 @@ function resolveAiProfile(profileName) {
   const all = _loadProfiles();
   const profile = all.find(p => p.name === profileName);
   if (!profile) return { status: 404, error: `Profile '${profileName}' not found` };
-  const isAi = Array.isArray(profile.tags) && profile.tags.some(t => (t.name || t) === 'ai');
-  if (!isAi) return { status: 403, error: 'Profile not tagged as ai-accessible' };
+  if (!profile.aiEnabled) return { status: 403, error: 'Profile does not have AI/MCP access enabled' };
   if (profile.protocol !== 'ssh') return { status: 400, error: 'File transfer only supports SSH profiles' };
   return { profile };
 }
 
 async function runScpTransfer(profile, scpTargets, timeout_ms) {
-  const scpArgs = ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-O'];
+  // -O forces the legacy SCP protocol (dropbear/BusyBox devices have no sftp
+  // subsystem). StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null keep the
+  // headless transfer from hanging on an unknown-host prompt. SSH honours the
+  // first value seen for an -o option, so these win over the accept-new that
+  // buildCommonSSHFlags appends below.
+  const scpArgs = ['-O', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null'];
   const cleanupFiles = [];
 
   try {
-    if (profile.pemFile) {
-      scpArgs.push('-i', profile.pemFile);
-    } else if (profile.pemText) {
+    // Resolve pasted PEM text to a temp key file so buildCommonSSHFlags can use it.
+    let effectiveProfile = profile;
+    if (!profile.pemFile && profile.pemText) {
       const keysDir = path.join(os.tmpdir(), 'prateek-term-keys');
       if (!fs.existsSync(keysDir)) fs.mkdirSync(keysDir, { recursive: true, mode: 0o700 });
       const hash = crypto.createHash('sha256').update(profile.pemText).digest('hex').slice(0, 12);
       const keyPath = path.join(keysDir, `scp-key-${hash}`);
       fs.writeFileSync(keyPath, profile.pemText, { mode: 0o600 });
-      scpArgs.push('-i', keyPath);
       cleanupFiles.push(keyPath);
+      effectiveProfile = { ...profile, pemFile: keyPath };
+    }
+
+    // Reuse the same auth/algorithm flags as the SSH terminal and UI drag-drop
+    // SCP: HostKeyAlgorithms=+ssh-rsa (needed by dropbear devices like the
+    // Lantronix E210), PubkeyAcceptedAlgorithms=+ssh-rsa, ConnectTimeout,
+    // -i / IdentitiesOnly, PreferredAuthentications, compression, etc.
+    scpArgs.push(...buildCommonSSHFlags(effectiveProfile));
+
+    // ProxyCommand — same mutual-exclusion rule as SSH terminal
+    if (effectiveProfile.cloudflareAccess) {
+      scpArgs.push(...buildCloudflareProxyFlags(effectiveProfile.cloudflaredPath || null));
+    } else if (effectiveProfile.proxyEnabled) {
+      scpArgs.push(...buildJumpHostProxyCommand(effectiveProfile));
     }
 
     if (profile.port && profile.port !== 22) scpArgs.push('-P', String(profile.port));
@@ -266,6 +295,7 @@ async function runScpTransfer(profile, scpTargets, timeout_ms) {
 let _terminals       = null; // Map<id, node-pty instance>
 let _serialConns     = null; // Map<id, serialport instance>
 let _loadProfiles    = null; // () => profile[]
+let _saveProfiles    = null; // (profiles) => void
 let _connectProfile  = null; // (profile) => { command, args, env, _cleanupFiles }
 let _spawnPty        = null; // (opts) => { id }
 let _writeInput      = null; // (id, data) => void
@@ -275,6 +305,7 @@ let _serialConnect   = null; // (opts) => { id }
 let _serialWrite     = null; // (id, data) => void
 let _serialClose     = null; // (id) => void
 let _getVersion      = null; // () => string
+let _broadcastProfilesChanged = null; // () => void  — notify renderer windows
 
 let _token  = null;
 let _server = null;
@@ -302,7 +333,7 @@ async function handleRequest(req, res) {
   if (req.method === 'GET' && url === '/profiles') {
     const all = _loadProfiles();
     const aiProfiles = all
-      .filter(p => Array.isArray(p.tags) && p.tags.some(t => (t.name || t) === 'ai'))
+      .filter(p => p.aiEnabled)
       .map(({ password, pemFile, pemText, ...safe }) => safe); // strip credentials
     return send(res, 200, aiProfiles);
   }
@@ -347,9 +378,8 @@ async function handleRequest(req, res) {
           const all = _loadProfiles();
           profile = all.find(p => p.name === body.profileName);
           if (!profile) return send(res, 404, { error: `Profile '${body.profileName}' not found` });
-          // Security: only ai-tagged profiles
-          const isAi = Array.isArray(profile.tags) && profile.tags.some(t => (t.name || t) === 'ai');
-          if (!isAi) return send(res, 403, { error: 'Profile not tagged as ai-accessible' });
+          // Security: only AI-enabled profiles
+          if (!profile.aiEnabled) return send(res, 403, { error: 'Profile does not have AI/MCP access enabled' });
         } else {
           // Inline profile — no credentials accepted from MCP clients
           profile = { protocol: body.protocol || 'local', host: body.host, username: body.username, port: body.port };
@@ -363,6 +393,7 @@ async function handleRequest(req, res) {
           rows:  50,
           _cleanupFiles: cmdInfo._cleanupFiles || [],
           _pendingPassword: (profile.authType === 'password') ? profile.password : undefined,
+          profileName: body.profileName || null,
         });
         sessionId = result.id;
         ensureBuf(sessionId);
@@ -531,6 +562,79 @@ async function handleRequest(req, res) {
     return send(res, failed ? 500 : 200, { ok: fileExists, output: result.output });
   }
 
+  // ── POST /profiles ────────────────────────────────────────────────────
+  // Add a new device profile. Returns 201 + the created profile on success.
+  if (req.method === 'POST' && url === '/profiles') {
+    const body = await readBody(req);
+    const { name, protocol = 'ssh', host, port, username, authType, password, pemFile, tags, aiEnabled = false } = body;
+
+    // Validate required fields
+    if (!name || !String(name).trim()) return send(res, 400, { error: 'name is required' });
+    const PROTOCOLS = ['ssh', 'serial', 'local', 'telnet', 'ftp'];
+    if (!PROTOCOLS.includes(protocol)) return send(res, 400, { error: `protocol must be one of: ${PROTOCOLS.join(', ')}` });
+    if (protocol !== 'local' && protocol !== 'serial' && !host) return send(res, 400, { error: `host is required for protocol "${protocol}"` });
+
+    const all = _loadProfiles();
+    const trimmedName = String(name).trim();
+    if (all.find(p => p.name === trimmedName)) return send(res, 409, { error: `Profile '${trimmedName}' already exists` });
+
+    const newProfile = {
+      id:        crypto.randomBytes(8).toString('hex'),
+      name:      trimmedName,
+      protocol,
+      host:      host || '',
+      port:      port != null ? Number(port) : (protocol === 'ssh' ? 22 : null),
+      username:  username || '',
+      authType:  authType || 'password',
+      password:  password || null,
+      pemFile:   pemFile  || null,
+      tags:      Array.isArray(tags) ? tags : (tags ? [tags] : []),
+      aiEnabled: Boolean(aiEnabled),
+    };
+
+    all.push(newProfile);
+    _saveProfiles(all);
+    if (_broadcastProfilesChanged) _broadcastProfilesChanged();
+    return send(res, 201, { ok: true, profile: newProfile });
+  }
+
+  // ── DELETE /profiles/:name ────────────────────────────────────────────
+  // Remove a profile by name. If active sessions use it and force!=true, returns 409.
+  const delProfileParams = matchRoute('DELETE', '/profiles/:name', url, req.method);
+  if (delProfileParams) {
+    const targetName = delProfileParams.name;
+    const body = await readBody(req).catch(() => ({}));
+    const force = body.force === true || body.force === 'true';
+
+    const all = _loadProfiles();
+    const idx = all.findIndex(p => p.name === targetName);
+    if (idx === -1) return send(res, 404, { error: `Profile '${targetName}' not found` });
+
+    // Guard: check for active sessions using this profile
+    const activeSessions = [];
+    if (_terminals) {
+      for (const [id, t] of _terminals.entries()) {
+        if (t._profileName === targetName) activeSessions.push(id);
+      }
+    }
+    if (activeSessions.length > 0 && !force) {
+      return send(res, 409, {
+        error: `Profile '${targetName}' has ${activeSessions.length} active session(s). Pass force:true to remove anyway.`,
+        activeSessions,
+      });
+    }
+
+    // Kill active sessions if forced
+    if (force && activeSessions.length > 0 && _killSession) {
+      activeSessions.forEach(id => _killSession(id));
+    }
+
+    const removed = all.splice(idx, 1)[0];
+    _saveProfiles(all);
+    if (_broadcastProfilesChanged) _broadcastProfilesChanged();
+    return send(res, 200, { ok: true, removed: { name: removed.name, id: removed.id } });
+  }
+
   send(res, 404, { error: 'Not found' });
 }
 
@@ -566,24 +670,28 @@ function matchRoute(method, pattern, url, reqMethod) {
  * @param {Function} opts.serialConnect
  * @param {Function} opts.serialWrite
  * @param {Function} opts.serialClose
- * @param {Function} opts.getVersion     - () => string
- * @param {number}   opts.port           - TCP port (default 29419)
+ * @param {Function} opts.getVersion              - () => string
+ * @param {Function} opts.saveProfiles            - (profiles) => void
+ * @param {Function} opts.broadcastProfilesChanged - () => void — push IPC event to renderer windows
+ * @param {number}   opts.port                    - TCP port (default 29419)
  */
 function start(opts) {
   if (_server) return; // already running
 
-  _terminals       = opts.terminals;
-  _serialConns     = opts.serialConns;
-  _loadProfiles    = opts.loadProfiles;
-  _connectProfile  = opts.connectProfile;
-  _spawnPty        = opts.spawnPty;
-  _writeInput      = opts.writeInput;
-  _killSession     = opts.killSession;
-  _listSerialPorts = opts.listSerialPorts;
-  _serialConnect   = opts.serialConnect;
-  _serialWrite     = opts.serialWrite;
-  _serialClose     = opts.serialClose;
-  _getVersion      = opts.getVersion;
+  _terminals                = opts.terminals;
+  _serialConns              = opts.serialConns;
+  _loadProfiles             = opts.loadProfiles;
+  _saveProfiles             = opts.saveProfiles;
+  _broadcastProfilesChanged = opts.broadcastProfilesChanged || null;
+  _connectProfile           = opts.connectProfile;
+  _spawnPty                 = opts.spawnPty;
+  _writeInput               = opts.writeInput;
+  _killSession              = opts.killSession;
+  _listSerialPorts          = opts.listSerialPorts;
+  _serialConnect            = opts.serialConnect;
+  _serialWrite              = opts.serialWrite;
+  _serialClose              = opts.serialClose;
+  _getVersion               = opts.getVersion;
   _port            = opts.port != null ? opts.port : 29419;
   if (opts.log)    _log    = opts.log;
   if (opts.logErr) _logErr = opts.logErr;
