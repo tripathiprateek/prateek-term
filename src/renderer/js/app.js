@@ -927,7 +927,7 @@ async function createTab(options = {}) {
     // Cmd+V is handled by xterm's native paste event → term.onData → serialWrite.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
-      if (e.metaKey && e.key === 'c') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
         if (term.hasSelection()) {
           navigator.clipboard.writeText(term.getSelection()).catch(() => {});
           return false;
@@ -1026,18 +1026,19 @@ async function createTab(options = {}) {
     // Clipboard shortcuts — must be set up after ptyId is known.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
-      // Cmd+C: copy selection; if no selection, let Ctrl+C reach PTY as SIGINT
-      if (e.metaKey && e.key === 'c') {
+      // Cmd/Ctrl+C: copy selection if present; otherwise let it reach the PTY as
+      // SIGINT (matches Windows Terminal: copy-on-selection, else interrupt).
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
         if (term.hasSelection()) {
           navigator.clipboard.writeText(term.getSelection()).catch(() => {});
           return false;
         }
         return true;
       }
-      // Cmd+V: return false so xterm does NOT fire its own internal paste on top
-      // of the Electron menu role:paste event (which already delivers one paste).
-      // This prevents the double-paste that garbles multi-line content.
-      if (e.metaKey && e.key === 'v') {
+      // Cmd/Ctrl+V: return false so xterm does NOT fire its own internal paste on
+      // top of the Electron menu role:paste event (which already delivers one
+      // paste). This prevents the double-paste that garbles multi-line content.
+      if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
         return false;
       }
       return true;
@@ -3064,14 +3065,14 @@ async function adoptTab(tearOffData) {
   // Clipboard shortcuts
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
-    if (e.metaKey && e.key === 'c') {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
       if (term.hasSelection()) {
         navigator.clipboard.writeText(term.getSelection()).catch(() => {});
         return false;
       }
       return true;
     }
-    if (e.metaKey && e.key === 'v') return false;
+    if ((e.metaKey || e.ctrlKey) && e.key === 'v') return false;
     return true;
   });
 
@@ -5225,8 +5226,25 @@ async function importActions() {
 
 // ===== Initialize =====
 
+// Tag <body> with the host platform and localize modifier-key glyphs / OS
+// wording. On Windows/Linux the ⌘ glyph in tooltips becomes "Ctrl" and Finder
+// becomes the native file-manager name.
+function applyPlatformUI() {
+  const plat = (window.terminalAPI && window.terminalAPI.platform) || 'darwin';
+  document.body.classList.add('platform-' + plat);
+  if (plat === 'darwin') return;
+  const fileMgr = plat === 'win32' ? 'File Explorer' : 'Files';
+  document.querySelectorAll('[title]').forEach((el) => {
+    const t = el.getAttribute('title');
+    if (t && (t.includes('⌘') || t.includes('Finder'))) {
+      el.setAttribute('title', t.replace(/⌘/g, 'Ctrl+').replace(/Ctrl\+\+/g, 'Ctrl+').replace(/Finder/g, fileMgr));
+    }
+  });
+}
+
 async function init() {
   try {
+    applyPlatformUI();
     await loadXtermModules();
     setupTerminalListeners();
     initTabScrollButtons();

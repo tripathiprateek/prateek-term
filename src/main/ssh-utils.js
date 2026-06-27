@@ -13,6 +13,9 @@ const path   = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
+// PATH-lookup command: `where` on Windows, `which` everywhere else.
+const WHICH_CMD = process.platform === 'win32' ? 'where' : 'which';
+
 // ---------------------------------------------------------------------------
 // SSH_ASKPASS-based password injection
 // ---------------------------------------------------------------------------
@@ -93,8 +96,8 @@ function findSshpass() {
     try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* try next */ }
   }
   try {
-    const p = execSync('which sshpass', { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString().trim();
+    const p = execSync(`${WHICH_CMD} sshpass`, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim().split(/\r?\n/)[0];
     if (p) return p;
   } catch { /* not found */ }
   return null;
@@ -159,8 +162,8 @@ function findCloudflared(overridePath) {
   }
   // PATH fallback
   try {
-    const p = execSync('which cloudflared', { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString().trim();
+    const p = execSync(`${WHICH_CMD} cloudflared`, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim().split(/\r?\n/)[0];
     if (p) {
       const ver = execSync(`"${p}" version 2>&1`, { stdio: 'pipe', timeout: 4000 })
         .toString().trim().split('\n')[0];

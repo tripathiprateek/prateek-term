@@ -27,13 +27,14 @@ const src = fs.readFileSync(MAIN_SRC, 'utf-8');
 
 describe('PTY spawn — login shell (BUG-004)', () => {
 
-  test('default args include -l to spawn a login shell', () => {
-    // Must contain: options.args || ['-l']  (or equivalent)
-    expect(src).toMatch(/options\.args\s*\|\|\s*\[['"][- ]l['"]\]/);
+  test('default args come from the per-OS login-shell resolver', () => {
+    // Unix → ['-l']; Windows → []. Provided by platform.loginShellArgs().
+    expect(src).toMatch(/platform\.loginShellArgs\(\)/);
+    expect(src).toMatch(/options\.args\s*\|\|\s*defaultArgs/);
   });
 
-  test('login shell arg appears before pty.spawn call', () => {
-    const loginIdx = src.indexOf("options.args || ['-l']");
+  test('loginShellArgs resolves before pty.spawn call', () => {
+    const loginIdx = src.indexOf('platform.loginShellArgs()');
     const spawnIdx = src.indexOf('pty.spawn(shell');
     expect(loginIdx).toBeGreaterThan(-1);
     expect(spawnIdx).toBeGreaterThan(-1);

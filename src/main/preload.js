@@ -15,6 +15,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('terminalAPI', {
+  // Host platform — 'darwin' | 'win32' | 'linux'. Lets the renderer pick the
+  // right modifier-key glyph (⌘ vs Ctrl), titlebar layout, and OS wording.
+  platform: process.platform,
+
   // Terminal operations
   createTerminal: (options) => ipcRenderer.invoke('terminal:create', options),
   sendInput: (id, data) => ipcRenderer.send('terminal:input', { id, data }),

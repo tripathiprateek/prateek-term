@@ -275,12 +275,17 @@ describe('shell:openChromeProxy — source contracts', () => {
     expect(source).toContain('filterList && filterList.trim()');
   });
 
-  test('Chrome binary path is hardcoded to macOS app bundle', () => {
-    expect(source).toContain('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+  test('Chrome binary is resolved per-OS via platform.chromePath()', () => {
+    expect(source).toContain('platform.chromePath()');
   });
 
-  test('--user-data-dir includes the proxy port for process isolation', () => {
-    expect(source).toMatch(/--user-data-dir="\/tmp\/chrome-proxy-\$\{p\}"/);
+  test('errors clearly when Chrome/Chromium is not found', () => {
+    expect(source).toMatch(/Chrome.*not found|not found.*Chrome/i);
+  });
+
+  test('--user-data-dir uses os.tmpdir() + the proxy port for process isolation', () => {
+    expect(source).toMatch(/os\.tmpdir\(\)[\s\S]{0,40}chrome-proxy-\$\{p\}/);
+    expect(source).toContain('--user-data-dir="${userDataDir}"');
   });
 
   test('port is validated to be in range 1–65535', () => {

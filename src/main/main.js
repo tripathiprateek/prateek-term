@@ -42,6 +42,9 @@ const {
   buildIncludePacUrl,
 } = require('./ssh-utils');
 
+// Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
+const platform = require('./platform');
+
 function getBuildNumber() {
   try {
     const p = app.isPackaged
@@ -422,7 +425,14 @@ function createNewWindow() {
     minWidth: 800,
     minHeight: 500,
     title: `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`,
-    titleBarStyle: 'hiddenInset',
+    // macOS: inset traffic lights over our custom titlebar. Windows: frameless
+    // with a native overlay giving min/max/close on the right. Linux: standard
+    // frame (WM-drawn controls) — most reliable across desktop environments.
+    ...(platform.isMac()
+      ? { titleBarStyle: 'hiddenInset' }
+      : platform.isWindows()
+        ? { titleBarStyle: 'hidden', titleBarOverlay: { color: '#1e1e2e', symbolColor: '#cdd6f4', height: 36 } }
+        : {}),
     backgroundColor: '#1e1e2e',
     icon: nativeImage.createFromPath(iconPath),
     webPreferences: {
@@ -435,9 +445,9 @@ function createNewWindow() {
   // Force native title bar to show version after page load overrides it
   const versionTitle = `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`;
   win.webContents.on('did-finish-load', () => win.setTitle(versionTitle));
-  // Block Cmd+R — reloading kills all open terminal sessions
+  // Block reload (Cmd+R on mac, Ctrl+R elsewhere) — it kills all open sessions.
   win.webContents.on('before-input-event', (event, input) => {
-    if (input.meta && input.key === 'r') event.preventDefault();
+    if ((input.meta || input.control) && input.key === 'r') event.preventDefault();
   });
   return win;
 }
@@ -490,7 +500,7 @@ app.whenReady().then(() => {
       submenu: [
         { label: 'About Prateek-Term', role: 'about' },
         { type: 'separator' },
-        { label: 'Settings...', accelerator: 'Cmd+,', click: () => mainWindow && mainWindow.webContents.send('open-settings') },
+        { label: 'Settings...', accelerator: 'CmdOrCtrl+,', click: () => mainWindow && mainWindow.webContents.send('open-settings') },
         { type: 'separator' },
         { label: 'Hide Prateek-Term', role: 'hide' },
         { label: 'Hide Others', role: 'hideOthers' },
@@ -522,7 +532,7 @@ app.whenReady().then(() => {
     {
       label: 'Window',
       submenu: [
-        { label: 'New Window', accelerator: 'Cmd+N', click: () => createNewWindow() },
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
         { type: 'separator' },
         { role: 'minimize' },
         { role: 'zoom' },
@@ -614,23 +624,9 @@ app.on('activate', () => {
 
 // ---------- Terminal Management ----------
 
+// Delegates to the per-OS resolver (zsh/bash/sh on Unix; pwsh/powershell/cmd on Windows).
 function findShell() {
-  const candidates = [
-    process.env.SHELL,
-    '/bin/zsh',
-    '/bin/bash',
-    '/bin/sh',
-  ].filter(Boolean);
-
-  for (const sh of candidates) {
-    try {
-      fs.accessSync(sh, fs.constants.X_OK);
-      return sh;
-    } catch {
-      // try next
-    }
-  }
-  return '/bin/sh';
+  return platform.findShell();
 }
 
 ipcMain.handle('terminal:create', (event, options = {}) => {
@@ -639,12 +635,14 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const ownerContents = event.sender;
   const id = ++terminalIdCounter;
   const shell = options.shell || findShell();
-  dbgLog(`[pty:${id}] create shell="${shell}" args=[${(options.args||['-l']).join(',')}] cwd="${options.cwd||'(default)'}" cols=${options.cols||80} rows=${options.rows||24} customCmd=${!!options.shell}`);
-  // Use -l (login shell) by default so ~/.bash_profile / ~/.zprofile are sourced
-  // and the PTY inherits the user's full PATH (NVM, Homebrew, Go, etc.) — the same
-  // environment iTerm2 and Terminal.app provide. Callers can pass args: [] explicitly
-  // to opt out (e.g. SSH or custom shell connections that manage their own env).
-  const args = options.args || ['-l'];
+  // Login flag (-l) only applies to Unix shells; Windows shells take no login arg.
+  const defaultArgs = platform.loginShellArgs();
+  dbgLog(`[pty:${id}] create shell="${shell}" args=[${(options.args||defaultArgs).join(',')}] cwd="${options.cwd||'(default)'}" cols=${options.cols||80} rows=${options.rows||24} customCmd=${!!options.shell}`);
+  // Use -l (login shell) by default on Unix so ~/.bash_profile / ~/.zprofile are
+  // sourced and the PTY inherits the user's full PATH (NVM, Homebrew, Go, etc.) —
+  // the same environment iTerm2/Terminal.app provide. Callers can pass args: []
+  // explicitly to opt out (e.g. SSH or custom shell connections).
+  const args = options.args || defaultArgs;
 
   let cwd = options.cwd || process.env.HOME || '/';
   // Ensure cwd is a readable DIRECTORY (not a file path).
@@ -669,19 +667,24 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const env = { ...process.env, ...(options.env || {}) };
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';
-  // Ensure UTF-8 locale so vim/less/man render Unicode (box-drawing chars etc.)
-  // correctly. Without this, apps launched from the macOS Dock may inherit no
-  // locale and fall back to Latin-1, garbling multi-byte characters.
-  if (!env.LANG)    env.LANG    = 'en_US.UTF-8';
-  if (!env.LC_ALL)  env.LC_ALL  = 'en_US.UTF-8';
-  if (!env.PATH) {
-    env.PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  // Ensure UTF-8 locale on Unix so vim/less/man render Unicode (box-drawing
+  // chars etc.) correctly — apps launched from the macOS Dock may inherit no
+  // locale and fall back to Latin-1. Windows uses code pages, not LANG/LC_ALL,
+  // so we don't set them there.
+  if (!platform.isWindows()) {
+    if (!env.LANG)   env.LANG   = 'en_US.UTF-8';
+    if (!env.LC_ALL) env.LC_ALL = 'en_US.UTF-8';
+    if (!env.PATH) {
+      env.PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+    }
   }
   // Prevent SSH from opening a GUI password dialog.
   // Password injection for SSH is handled by the renderer auto-type (see app.js).
   delete env.SSH_ASKPASS;
   delete env.SSH_ASKPASS_REQUIRE;
 
+  // Last-resort shell if the chosen one fails to spawn: cmd.exe on Windows, /bin/sh on Unix.
+  const fallbackShell = platform.isWindows() ? (process.env.COMSPEC || 'cmd.exe') : '/bin/sh';
   let term;
   try {
     term = pty.spawn(shell, args, {
@@ -693,13 +696,13 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     });
     dbgLog(`[pty:${id}] spawned pid=${term.pid} shell="${shell}" cwd="${cwd}"`);
   } catch (err) {
-    dbgLog(`[pty:${id}] spawn failed shell="${shell}" cwd="${cwd}" err="${err.message}" — falling back to /bin/sh`);
+    dbgLog(`[pty:${id}] spawn failed shell="${shell}" cwd="${cwd}" err="${err.message}" — falling back to ${fallbackShell}`);
     dbgLog(`[pty] Failed to spawn shell "${shell}" in "${cwd}": ${err.message}`);
-    term = pty.spawn('/bin/sh', args, {
+    term = pty.spawn(fallbackShell, platform.isWindows() ? [] : args, {
       name: 'xterm-256color',
       cols: options.cols || 80,
       rows: options.rows || 24,
-      cwd: '/',
+      cwd: platform.isWindows() ? (process.env.USERPROFILE || os.homedir()) : '/',
       env,
     });
     dbgLog(`[pty:${id}] fallback spawned pid=${term.pid}`);
@@ -893,17 +896,9 @@ ipcMain.handle('mcp:status', () => ({
 }));
 
 // ── MCP auto-registration ────────────────────────────────────────────────────
-// Finds an executable by trying `which` first, then a list of fallback paths.
+// Finds an executable on PATH (`which`/`where`) or among fallback paths.
 function findExec(name, fallbacks = []) {
-  return new Promise((resolve) => {
-    require('child_process').execFile('/usr/bin/which', [name], (err, stdout) => {
-      if (!err && stdout.trim()) return resolve(stdout.trim());
-      for (const p of fallbacks) {
-        if (fs.existsSync(p)) return resolve(p);
-      }
-      resolve(null);
-    });
-  });
+  return Promise.resolve(platform.whichBin(name, fallbacks));
 }
 
 ipcMain.handle('mcp:register', async () => {
@@ -924,15 +919,14 @@ ipcMain.handle('mcp:register', async () => {
     const nodeModules = path.join(mcpDir, 'node_modules', '@modelcontextprotocol');
     if (!fs.existsSync(nodeModules)) {
       const { execSync } = require('child_process');
-      // Electron packaged apps have a minimal PATH that often excludes
-      // /opt/homebrew/bin and /usr/local/bin where npm/node live.
-      // Extend PATH so npm can be found regardless of install location.
-      const extraPaths = [
-        '/opt/homebrew/bin',
-        '/usr/local/bin',
-        path.join(os.homedir(), '.npm-global', 'bin'),
-      ];
-      const envPATH = (process.env.PATH || '') + ':' + extraPaths.join(':');
+      // Electron packaged apps have a minimal PATH that often excludes the dirs
+      // where npm/node live (Homebrew on macOS). Extend PATH so npm is found.
+      const extraPaths = platform.isWindows()
+        ? []
+        : ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.npm-global', 'bin')];
+      const envPATH = extraPaths.length
+        ? (process.env.PATH || '') + path.delimiter + extraPaths.join(path.delimiter)
+        : (process.env.PATH || '');
       try {
         dbgLog(`[MCP] npm install in ${mcpDir}`);
         execSync('npm install --omit=dev', { cwd: mcpDir, timeout: 60000, stdio: 'pipe', env: { ...process.env, PATH: envPATH } });
@@ -947,18 +941,17 @@ ipcMain.handle('mcp:register', async () => {
   }
   const results = {};
 
+  const nodeCandidates = platform.isWindows()
+    ? [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe')]
+    : ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
+  const claudeCandidates = platform.isWindows()
+    ? [path.join(process.env.APPDATA || '', 'npm', 'claude.cmd')]
+    : ['/opt/homebrew/bin/claude', '/usr/local/bin/claude',
+       path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
+       path.join(os.homedir(), '.local', 'bin', 'claude')];
   const [nodePath, claudePath] = await Promise.all([
-    findExec('node', [
-      '/opt/homebrew/bin/node',
-      '/usr/local/bin/node',
-      '/usr/bin/node',
-    ]),
-    findExec('claude', [
-      '/opt/homebrew/bin/claude',
-      '/usr/local/bin/claude',
-      path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
-      path.join(os.homedir(), '.local', 'bin', 'claude'),
-    ]),
+    findExec(platform.isWindows() ? 'node.exe' : 'node', nodeCandidates),
+    findExec(platform.isWindows() ? 'claude.cmd' : 'claude', claudeCandidates),
   ]);
 
   // ── Claude Code ──────────────────────────────────────────────────────────
@@ -986,9 +979,7 @@ ipcMain.handle('mcp:register', async () => {
   }
 
   // ── Claude Desktop ───────────────────────────────────────────────────────
-  const desktopCfgPath = path.join(
-    os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'
-  );
+  const desktopCfgPath = platform.claudeDesktopConfigPath();
   try {
     let cfg = {};
     if (fs.existsSync(desktopCfgPath)) {
@@ -1351,7 +1342,10 @@ ipcMain.handle('dialog:selectDirectory', async (event, options = {}) => {
 ipcMain.handle('shell:openChromeProxy', async (event, { port, filterMode, filterList }) => {
   const p = parseInt(port, 10);
   if (!p || p < 1 || p > 65535) throw new Error(`Invalid port: ${port}`);
-  const chromeBin = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const chromeBin = platform.chromePath();
+  if (!chromeBin) {
+    throw new Error('Google Chrome / Chromium not found. Install it to launch a proxied browser.');
+  }
 
   let proxyFlags;
   if (filterMode === 'include' && filterList && filterList.trim()) {
@@ -1364,7 +1358,8 @@ ipcMain.handle('shell:openChromeProxy', async (event, { port, filterMode, filter
     proxyFlags = `--proxy-server="socks5://127.0.0.1:${p}" --proxy-bypass-list="<-loopback>"`;
   }
 
-  const cmd = `"${chromeBin}" ${proxyFlags} --user-data-dir="/tmp/chrome-proxy-${p}"`;
+  const userDataDir = path.join(os.tmpdir(), `chrome-proxy-${p}`);
+  const cmd = `"${chromeBin}" ${proxyFlags} --user-data-dir="${userDataDir}"`;
   return new Promise((resolve, reject) => {
     exec(cmd, (err) => {
       if (err) reject(err);
@@ -1381,7 +1376,17 @@ ipcMain.handle('terminal:getCwd', (event, { id }) => {
     dbgLog(`[pty:${id}] getCwd — terminal not found or no pid`);
     return null;
   }
+  // Windows has no lsof / /proc — skip; drag-drop just falls back to the home dir.
+  if (platform.isWindows()) return null;
   try {
+    // Linux exposes the shell's cwd directly as a symlink — cheaper than lsof.
+    if (platform.isLinux()) {
+      try {
+        const cwd = fs.readlinkSync(`/proc/${term.pid}/cwd`);
+        dbgLog(`[pty:${id}] getCwd (/proc) pid=${term.pid} → "${cwd}"`);
+        return cwd;
+      } catch { /* fall through to lsof */ }
+    }
     // Read CWD directly from the shell process — no commands injected into the terminal.
     // lsof -p <pid> -a -d cwd -Fn emits lines like "fcwd" then "n/path/to/dir".
     const output = require('child_process').execFileSync(
@@ -1706,18 +1711,15 @@ function spawnPtyForBridge(options) {
   const env      = { ...process.env, ...(options.env || {}) };
   env.TERM       = 'xterm-256color';
   env.COLORTERM  = 'truecolor';
-  if (!env.LANG)   env.LANG   = 'en_US.UTF-8';
-  if (!env.LC_ALL) env.LC_ALL = 'en_US.UTF-8';
-  // Ensure SSH can find the agent socket (Electron launched from Dock may strip it)
+  if (!platform.isWindows()) {
+    if (!env.LANG)   env.LANG   = 'en_US.UTF-8';
+    if (!env.LC_ALL) env.LC_ALL = 'en_US.UTF-8';
+  }
+  // Ensure SSH can find the agent socket (Electron launched from the Dock may
+  // strip it on macOS). On Win/Linux we trust the inherited env.
   if (!env.SSH_AUTH_SOCK) {
-    try {
-      const tmpDir = '/private/tmp';
-      const launchdDirs = fs.readdirSync(tmpDir).filter(d => d.startsWith('com.apple.launchd.'));
-      for (const d of launchdDirs) {
-        const sock = path.join(tmpDir, d, 'Listeners');
-        if (fs.existsSync(sock)) { env.SSH_AUTH_SOCK = sock; break; }
-      }
-    } catch { /* no agent — IdentitiesOnly=yes on key profiles will handle this */ }
+    const sock = platform.sshAgentSock();
+    if (sock) env.SSH_AUTH_SOCK = sock;
   }
   delete env.SSH_ASKPASS;
   delete env.SSH_ASKPASS_REQUIRE;

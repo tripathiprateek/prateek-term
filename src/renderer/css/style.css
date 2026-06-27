@@ -64,11 +64,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 12px 0 80px;
+  /* Default (Linux / fallback): symmetric padding, WM draws window controls. */
+  padding: 0 12px;
   -webkit-app-region: drag;
   border-bottom: 1px solid var(--border-color);
   user-select: none;
 }
+/* macOS: leave room on the left for the inset traffic-light buttons. */
+body.platform-darwin #titlebar { padding: 0 12px 0 80px; }
+/* Windows: leave room on the right for the native min/max/close overlay. */
+body.platform-win32 #titlebar { padding: 0 140px 0 12px; }
 
 .titlebar-drag-region {
   flex: 1;

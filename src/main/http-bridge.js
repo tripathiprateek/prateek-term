@@ -19,6 +19,7 @@ const path   = require('path');
 const fs     = require('fs');
 const os     = require('os');
 const { buildCloudflareProxyFlags, buildJumpHostProxyCommand, buildCommonSSHFlags } = require('./ssh-utils');
+const platform = require('./platform');
 
 // Cross-platform token path — mirrors Electron's app.getPath('userData')
 function _getTokenPath() {
@@ -249,21 +250,28 @@ async function runScpTransfer(profile, scpTargets, timeout_ms) {
     if (profile.port && profile.port !== 22) scpArgs.push('-P', String(profile.port));
     scpArgs.push(...scpTargets);
 
-    const shellQuote = (a) => `'${a.replace(/'/g, "'\\''")}'`;
-    let cmd;
+    // Spawn the binary directly via argv (no shell) so there's zero quoting to
+    // get wrong — works identically on macOS, Linux, and Windows (scp.exe).
+    let binCmd, binArgs;
     if (profile.password && !profile.pemFile && !profile.pemText) {
+      // sshpass doesn't exist on Windows; if it's not found, password-based
+      // transfer can't work — return a clear message instead of hanging.
+      const sshpassBin = platform.whichBin('sshpass',
+        ['/opt/homebrew/bin/sshpass', '/usr/local/bin/sshpass', '/usr/bin/sshpass']);
+      if (!sshpassBin) {
+        return { output: 'ERROR: password-based file transfer requires sshpass, which is not available on this platform. Use key-based authentication for SCP/SFTP instead.' };
+      }
       const pwPath = path.join(os.tmpdir(), `prateek-term-pw-${crypto.randomBytes(4).toString('hex')}`);
       fs.writeFileSync(pwPath, profile.password, { mode: 0o600 });
       cleanupFiles.push(pwPath);
-      // Use full path to sshpass — Electron's PATH may not include Homebrew
-      const sshpassBin = ['/opt/homebrew/bin/sshpass', '/usr/local/bin/sshpass', '/usr/bin/sshpass']
-        .find(p => fs.existsSync(p)) || 'sshpass';
-      cmd = `${sshpassBin} -f '${pwPath}' scp ${scpArgs.map(shellQuote).join(' ')}`;
+      binCmd = sshpassBin;
+      binArgs = ['-f', pwPath, 'scp', ...scpArgs];
     } else {
-      cmd = `scp ${scpArgs.map(shellQuote).join(' ')}`;
+      binCmd = 'scp';
+      binArgs = scpArgs;
     }
 
-    const result = await _spawnPty({ shell: '/bin/bash', args: ['-c', cmd], cols: 200, rows: 50, _cleanupFiles: [] });
+    const result = await _spawnPty({ shell: binCmd, args: binArgs, cols: 200, rows: 50, _cleanupFiles: [] });
     const scpSessionId = result.id;
     ensureBuf(scpSessionId);
 

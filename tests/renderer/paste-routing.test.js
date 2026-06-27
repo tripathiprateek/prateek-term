@@ -34,13 +34,13 @@ beforeAll(() => {
 // BUG-003 — Cmd+V must return false from attachCustomKeyEventHandler
 // ---------------------------------------------------------------------------
 
-describe('Cmd+V double-paste prevention (BUG-003)', () => {
-  test('attachCustomKeyEventHandler returns false for Cmd+V', () => {
-    // The handler must short-circuit xterm's own Cmd+V processing.
-    // Look for: if (e.metaKey && e.key === 'v') { return false; }
-    expect(source).toMatch(/e\.metaKey\s*&&\s*e\.key\s*===\s*'v'/);
+describe('Cmd/Ctrl+V double-paste prevention (BUG-003)', () => {
+  test('attachCustomKeyEventHandler returns false for Cmd/Ctrl+V', () => {
+    // The handler must short-circuit xterm's own paste processing on both
+    // macOS (Cmd+V) and Windows/Linux (Ctrl+V).
+    expect(source).toMatch(/\(e\.metaKey\s*\|\|\s*e\.ctrlKey\)\s*&&\s*e\.key\s*===\s*'v'/);
     // Verify the branch ends with return false (blocks xterm's internal handler)
-    const cmdVBlock = source.match(/e\.metaKey\s*&&\s*e\.key\s*===\s*'v'[\s\S]{0,100}return false/);
+    const cmdVBlock = source.match(/\(e\.metaKey\s*\|\|\s*e\.ctrlKey\)\s*&&\s*e\.key\s*===\s*'v'[\s\S]{0,100}return false/);
     expect(cmdVBlock).not.toBeNull();
   });
 });
