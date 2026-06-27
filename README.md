@@ -1,13 +1,12 @@
 <h1 align="center">Prateek-Term</h1>
 
 <p align="center">
-  <strong>A modern macOS terminal with SSH, Serial, SFTP &amp; native MCP support for AI agents</strong>
+  <strong>A modern cross-platform terminal with SSH, Serial, SFTP &amp; native MCP support for AI agents</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/tripathiprateek/prateek-term/releases"><img src="https://img.shields.io/github/v/release/tripathiprateek/prateek-term?style=flat-square" alt="Release"></a>
-  <img src="https://img.shields.io/badge/platform-macOS-blue?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/arch-arm64-lightgrey?style=flat-square" alt="Architecture">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="Platform">
   <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/"><img src="https://img.shields.io/badge/license-PolyForm%20NC-green?style=flat-square" alt="License"></a>
 </p>
 
@@ -17,7 +16,7 @@
 
 ---
 
-## The first macOS terminal with native MCP support
+## A cross-platform terminal with native MCP support
 
 Prateek-Term is more than a terminal emulator. It exposes **13 MCP tools** that let AI agents (Claude Desktop, Claude Code, or any MCP client) connect to SSH devices, run commands, transfer files, add/remove profiles, and manage sessions — all through a standardized protocol.
 
@@ -78,7 +77,15 @@ No plugins. No wrappers. Built in.
 
 ### Install
 
-Download the latest DMG from [Releases](https://github.com/tripathiprateek/prateek-term/releases), open it, and drag Prateek-Term to Applications.
+Download the latest build for your OS from [Releases](https://github.com/tripathiprateek/prateek-term/releases):
+
+| Platform | File | Notes |
+|----------|------|-------|
+| **macOS** (Apple Silicon) | `.dmg` | Open it, drag Prateek-Term to Applications. Ad-hoc signed — if Gatekeeper warns, right-click → Open → Open anyway. |
+| **Windows** | `Setup .exe` (installer) or portable `.exe` | Unsigned — on the SmartScreen prompt click **More info → Run anyway**. |
+| **Linux** | `.AppImage` (any distro) or `.deb` (Debian/Ubuntu) | `chmod +x *.AppImage && ./*.AppImage`, or `sudo dpkg -i *.deb`. |
+
+After install you can register the OS integration ("Open in Prateek-Term") from **Settings**: a Finder Quick Action on macOS, a right-click folder menu on Windows, and a `.desktop` entry + `prateekterm://` handler on Linux.
 
 ### Enable MCP
 
@@ -112,14 +119,26 @@ npm run lint         # lint source
 
 ### Build
 
+Native modules (`node-pty`, `serialport`) can't be cross-compiled — build each OS on that OS:
+
 ```bash
-npm run dist:arm64   # builds DMG + ZIP for Apple Silicon
+npm run dist          # macOS  → .dmg + .zip
+npm run dist:win      # Windows → NSIS installer + portable .exe (x64, arm64)
+npm run dist:linux    # Linux  → AppImage + .deb (x64, arm64)
 ```
+
+CI builds all three in a matrix (`.github/workflows/ci.yml`) and attaches every artifact to the GitHub Release on a `v*` tag.
 
 ## Requirements
 
-- macOS 12+ (Apple Silicon / arm64)
+- macOS 12+ / Windows 10+ / a modern Linux desktop
 - Node.js 18+
+
+### Platform notes
+
+- **SSH password auth** works everywhere via in-terminal auto-type.
+- **SCP/SFTP password auth** (drag-drop upload, MCP `upload_file`) needs `sshpass`, which doesn't exist on Windows — use **key-based auth** there. macOS/Linux are unaffected.
+- **Linux file-manager "open here"** integration varies by desktop environment; the `.desktop` entry + `prateekterm://` handler are installed automatically, per-DE context-menu actions may need a manual step.
 
 ---
 

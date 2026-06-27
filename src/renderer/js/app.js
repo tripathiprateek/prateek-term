@@ -4300,6 +4300,7 @@ function setupEventListeners() {
   document.getElementById('btn-set-default-terminal').addEventListener('click', async () => {
     const btn    = document.getElementById('btn-set-default-terminal');
     const status = document.getElementById('default-terminal-status');
+    const label  = btn.textContent; // platform-appropriate label set by applyPlatformUI
     btn.disabled    = true;
     btn.textContent = 'Setting…';
     try {
@@ -4312,13 +4313,13 @@ function setupEventListeners() {
         status.textContent = res.error || 'Failed to set default terminal';
         status.className   = 'settings-default-term-status not-default';
         btn.disabled       = false;
-        btn.textContent    = 'Set as Default Terminal';
+        btn.textContent    = label;
       }
     } catch (e) {
       status.textContent = e.message;
       status.className   = 'settings-default-term-status not-default';
       btn.disabled       = false;
-      btn.textContent    = 'Set as Default Terminal';
+      btn.textContent    = label;
     }
   });
   document.getElementById('btn-import-ssh').addEventListener('click', importSSHConfig);
@@ -4926,14 +4927,22 @@ async function refreshDefaultTerminalStatus() {
   const status = document.getElementById('default-terminal-status');
   if (!btn || !status) return;
 
+  const plat = (window.terminalAPI && window.terminalAPI.platform) || 'darwin';
+  const COPY = {
+    darwin: { on: '✓ Already the default terminal', onBtn: 'Default Terminal', offBtn: 'Set as Default Terminal' },
+    win32:  { on: '✓ Added to the Explorer menu',   onBtn: 'Installed ✓',      offBtn: 'Add to Explorer menu' },
+    linux:  { on: '✓ Registered with the desktop',  onBtn: 'Installed ✓',      offBtn: 'Register with desktop' },
+  }[plat] || { on: '✓ Installed', onBtn: 'Installed ✓', offBtn: 'Install integration' };
+
   try {
     const res = await window.terminalAPI.isDefaultTerminal();
     if (res.isDefault) {
-      status.textContent = '✓ Already the default terminal';
+      status.textContent = COPY.on;
       status.className   = 'settings-default-term-status is-default';
       btn.disabled       = true;
-      btn.textContent    = 'Default Terminal';
+      btn.textContent    = COPY.onBtn;
     } else if (!res.nativeAvailable) {
+      // macOS only — the LaunchServices addon wasn't compiled.
       status.textContent = 'Native addon not compiled (run: npm run rebuild:native)';
       status.className   = 'settings-default-term-status not-default';
       btn.disabled       = true;
@@ -4941,7 +4950,7 @@ async function refreshDefaultTerminalStatus() {
       status.textContent = res.currentBundleId ? `Current: ${res.currentBundleId}` : '';
       status.className   = 'settings-default-term-status not-default';
       btn.disabled       = false;
-      btn.textContent    = 'Set as Default Terminal';
+      btn.textContent    = COPY.offBtn;
     }
   } catch (e) {
     status.textContent = '';
@@ -5238,6 +5247,26 @@ function applyPlatformUI() {
     const t = el.getAttribute('title');
     if (t && (t.includes('⌘') || t.includes('Finder'))) {
       el.setAttribute('title', t.replace(/⌘/g, 'Ctrl+').replace(/Ctrl\+\+/g, 'Ctrl+').replace(/Finder/g, fileMgr));
+    }
+  });
+
+  // Re-word the "Default Terminal" section for the platform's integration model.
+  const title = document.getElementById('default-terminal-title');
+  const desc  = document.getElementById('default-terminal-desc');
+  const btn   = document.getElementById('btn-set-default-terminal');
+  if (plat === 'win32') {
+    if (title) title.textContent = 'Explorer Integration';
+    if (desc)  desc.textContent  = 'Add an "Open in Prateek-Term" entry to the right-click menu on folders in File Explorer.';
+    if (btn)   btn.textContent   = 'Add to Explorer menu';
+  } else {
+    if (title) title.textContent = 'Desktop Integration';
+    if (desc)  desc.textContent  = 'Register Prateek-Term with your desktop (app menu, prateekterm:// links, and "open folder" support) via a .desktop entry.';
+    if (btn)   btn.textContent   = 'Register with desktop';
+  }
+  // "Show in Finder" → native file-manager wording.
+  document.querySelectorAll('button, a, span').forEach((el) => {
+    if (el.children.length === 0 && el.textContent && el.textContent.includes('Finder')) {
+      el.textContent = el.textContent.replace(/Finder/g, fileMgr);
     }
   });
 }

@@ -48,13 +48,13 @@ describe('refreshDefaultTerminalStatus function', () => {
   });
 
   test('refreshDefaultTerminalStatus calls window.terminalAPI.isDefaultTerminal()', () => {
-    const fnBlock = source.match(/async function refreshDefaultTerminalStatus\s*\(\)[\s\S]{0,500}/);
+    const fnBlock = source.match(/async function refreshDefaultTerminalStatus\s*\(\)[\s\S]{0,1200}/);
     expect(fnBlock).not.toBeNull();
     expect(fnBlock[0]).toContain('window.terminalAPI.isDefaultTerminal()');
   });
 
   test('refreshDefaultTerminalStatus applies is-default CSS class when already default', () => {
-    const fnBlock = source.match(/async function refreshDefaultTerminalStatus\s*\(\)[\s\S]{0,500}/);
+    const fnBlock = source.match(/async function refreshDefaultTerminalStatus\s*\(\)[\s\S]{0,1200}/);
     expect(fnBlock).not.toBeNull();
     expect(fnBlock[0]).toContain('is-default');
   });
