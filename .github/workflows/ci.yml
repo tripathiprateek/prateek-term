@@ -11,11 +11,20 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Use bash on every runner (Git Bash on Windows) so build scripts are uniform.
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  # ─── Lint & Test ─────────────────────────────────────────────────────────
+  # ─── Lint & Test (all three OSes) ─────────────────────────────────────────
   test:
-    name: Lint & Test
-    runs-on: macos-14          # Apple M1 arm64
+    name: Lint & Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,8 +39,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-        env:
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 
       - name: Lint
         run: npm run lint
@@ -39,13 +46,24 @@ jobs:
       - name: Test
         run: npm test
 
-  # ─── Build DMG + ZIP ─────────────────────────────────────────────────────
+  # ─── Build installers per OS ──────────────────────────────────────────────
+  # node-pty / serialport native modules cannot be cross-compiled, so each OS
+  # builds on its own runner. electron-builder targets the host OS.
   build:
-    name: Build arm64 DMG
+    name: Build (${{ matrix.name }})
     needs: test
-    # Build on every push to main and on every tag; skip for PRs
     if: github.event_name != 'pull_request'
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos
+          - os: windows-latest
+            name: windows
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -64,47 +82,49 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Install Linux packaging deps (deb)
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fakeroot dpkg
+
       - name: Install dependencies
         run: npm ci
-        env:
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 
-      - name: Build arm64 distribution
-        # Use --publish never so electron-builder does NOT try to push to GitHub
-        # Releases itself — the separate `release` job handles that with proper
-        # structured release notes.
-        # Retry up to 3 times — hdiutil resize can fail intermittently on GHA runners
+      - name: Build distribution
+        # No --mac/--win/--linux flag: electron-builder targets the host OS.
+        # --publish never — the release job handles GitHub Releases.
+        # Retry up to 3× — hdiutil (mac DMG) / appimage steps can flake on CI.
         run: |
           npm run prebuild
           for attempt in 1 2 3; do
             echo "Build attempt $attempt..."
-            if npx electron-builder --mac --arm64 --publish never; then
+            if npx electron-builder --publish never; then
               echo "Build succeeded on attempt $attempt"
               break
             fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "Build failed after 3 attempts"
-              exit 1
-            fi
+            if [ "$attempt" -eq 3 ]; then echo "Build failed after 3 attempts"; exit 1; fi
             echo "Build failed, retrying in 10s..."
             sleep 10
           done
         env:
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
-          # Prevent electron-builder from searching for a Developer ID cert.
-          # Ad-hoc signing is handled by build/afterPack.js instead.
+          # macOS: ad-hoc signing is done in build/afterPack.js — stop
+          # electron-builder from hunting for a Developer ID cert.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prateek-term-arm64
+          name: prateek-term-${{ matrix.name }}
           path: |
             dist/*.dmg
             dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
           retention-days: 30
+          if-no-files-found: ignore
 
-  # ─── GitHub Release ───────────────────────────────────────────────────────
+  # ─── GitHub Release (all platforms' artifacts) ────────────────────────────
   release:
     name: Create GitHub Release
     needs: build
@@ -118,30 +138,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download build artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: prateek-term-arm64
-          path: dist/
+          path: artifacts
+
+      - name: Flatten artifacts into dist/
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.yml' \) -exec cp {} dist/ \;
+          ls -la dist/
 
       - name: Generate release notes
         id: notes
         run: |
           VERSION="${{ needs.build.outputs.version }}"
           TAG="${{ github.ref_name }}"
-
-          # Find the previous tag to scope the changelog
           PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then RANGE="${PREV_TAG}..HEAD"; else RANGE="HEAD"; fi
 
-          if [ -n "$PREV_TAG" ]; then
-            RANGE="${PREV_TAG}..HEAD"
-            echo "Changes since ${PREV_TAG}:"
-          else
-            RANGE="HEAD"
-            echo "Initial release:"
-          fi
-
-          # Parse conventional commits into sections
           get_commits() {
             local prefix="$1"
             git log $RANGE --pretty=format:"%s" --no-merges \
@@ -151,7 +166,6 @@ jobs:
               | sed 's/^/- /' \
               || true
           }
-
           FEATS=$(get_commits "feat")
           FIXES=$(get_commits "fix")
           PERFS=$(get_commits "perf")
@@ -161,54 +175,38 @@ jobs:
 
           BODY="## Prateek-Term ${VERSION}
 
-          > macOS arm64 — Apple Silicon only
+          Cross-platform — macOS, Windows, and Linux.
 
           ### Download
-          | File | Description |
-          |------|-------------|
-          | \`Prateek-Term-${VERSION}-arm64.dmg\` | Drag-and-drop installer |
-          | \`Prateek-Term-${VERSION}-arm64.zip\` | Portable app bundle |
+          | Platform | File |
+          |----------|------|
+          | macOS (Apple Silicon) | \`Prateek-Term-${VERSION}-arm64.dmg\` |
+          | Windows | \`Prateek-Term Setup ${VERSION}.exe\` (installer) / portable .exe |
+          | Linux | \`Prateek-Term-${VERSION}.AppImage\` / \`.deb\` |
 
-          > **Note:** The app uses ad-hoc signing. If macOS shows a security warning, right-click the app → Open → Open anyway.
+          > **macOS:** ad-hoc signed — right-click the app -> Open -> Open anyway if Gatekeeper warns.
+          > **Windows:** unsigned — click \"More info\" -> \"Run anyway\" on the SmartScreen prompt.
           "
 
-          if [ -n "$FEATS" ]; then
-            BODY="${BODY}
-          ### 🚀 New Features
+          [ -n "$FEATS" ]     && BODY="${BODY}
+          ### New Features
           ${FEATS}"
-          fi
-
-          if [ -n "$FIXES" ]; then
-            BODY="${BODY}
-          ### 🐛 Bug Fixes
+          [ -n "$FIXES" ]     && BODY="${BODY}
+          ### Bug Fixes
           ${FIXES}"
-          fi
-
-          if [ -n "$PERFS" ]; then
-            BODY="${BODY}
-          ### ⚡ Performance
+          [ -n "$PERFS" ]     && BODY="${BODY}
+          ### Performance
           ${PERFS}"
-          fi
-
-          if [ -n "$REFACTORS" ]; then
-            BODY="${BODY}
-          ### 🔧 Improvements
+          [ -n "$REFACTORS" ] && BODY="${BODY}
+          ### Improvements
           ${REFACTORS}"
-          fi
-
-          if [ -n "$DOCS" ]; then
-            BODY="${BODY}
-          ### 📚 Documentation
+          [ -n "$DOCS" ]      && BODY="${BODY}
+          ### Documentation
           ${DOCS}"
-          fi
-
-          if [ -n "$CHORES" ]; then
-            BODY="${BODY}
-          ### 🔨 Maintenance
+          [ -n "$CHORES" ]    && BODY="${BODY}
+          ### Maintenance
           ${CHORES}"
-          fi
 
-          # Write to a file to avoid escaping issues
           echo "$BODY" > release-notes.md
           cat release-notes.md
 
