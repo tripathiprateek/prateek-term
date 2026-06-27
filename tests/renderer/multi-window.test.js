@@ -126,12 +126,15 @@ describe('pendingAutoConnect — profile delivery to new windows', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Multiple instances allowed (no requestSingleInstanceLock)
+// Multiple instances allowed on macOS; Windows/Linux use a single-instance
+// lock so protocol/"open in" argv is forwarded to the running app.
 // ---------------------------------------------------------------------------
 
 describe('Multiple instances', () => {
-  test('does NOT call requestSingleInstanceLock (allows multiple windows)', () => {
-    expect(mainSource).not.toContain('requestSingleInstanceLock');
+  test('single-instance lock is guarded to non-macOS (mac keeps multi-window)', () => {
+    // The lock must only be acquired when NOT on macOS, so macOS still allows
+    // multiple independent windows/instances.
+    expect(mainSource).toMatch(/!platform\.isMac\(\)[\s\S]{0,200}requestSingleInstanceLock/);
   });
 
   test('does NOT set LSMultipleInstancesProhibited in package.json', () => {

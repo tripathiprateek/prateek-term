@@ -163,6 +163,27 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient('prateekterm');
 }
 
+// On Windows/Linux a protocol link or "Open in Prateek-Term" context-menu entry
+// launches a second process whose argv carries the URL/folder. Enforce a single
+// instance there so that argv is forwarded to the already-running app via the
+// 'second-instance' event. macOS intentionally allows multiple instances and
+// delivers via open-url/open-file events instead, so we skip the lock there.
+if (!platform.isMac()) {
+  const gotInstanceLock = app.requestSingleInstanceLock();
+  if (!gotInstanceLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', (_event, argv) => {
+      handleArgv(argv);
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  }
+}
+
 // Buffer URLs that arrive before the renderer is ready
 let pendingFolderPaths = [];
 let rendererReady = false;
@@ -293,6 +314,31 @@ function handlePrateekTermUrl(url) {
     }
   } catch (e) {
     dbgLog(`ERROR: ${e.message}`);
+  }
+}
+
+// Windows/Linux: protocol links and "Open in Prateek-Term" launches arrive as
+// argv (not as open-url/open-file events). Scan argv for a prateekterm:// URL
+// first, then for an existing folder/file path, and route it.
+function handleArgv(argv) {
+  if (!Array.isArray(argv)) return;
+  const rest = argv.slice(1);
+  const url = rest.find((a) => typeof a === 'string' && a.startsWith('prateekterm://'));
+  if (url) { handlePrateekTermUrl(url); return; }
+  for (const arg of rest) {
+    if (typeof arg !== 'string' || arg.startsWith('-')) continue;
+    try {
+      const st = fs.statSync(arg);
+      const dir = st.isDirectory() ? arg : path.dirname(arg);
+      if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+        mainWindow.webContents.send('open-folder', dir);
+      } else {
+        pendingFolderPaths.push(dir);
+      }
+      return;
+    } catch { /* not a path */ }
   }
 }
 
@@ -574,6 +620,9 @@ app.whenReady().then(() => {
   // default terminal (e.g. Finder "Open in Terminal" cold-launch).
   // macOS may pass the folder as argv[1] alongside Electron internals.
   // We check AFTER the app is ready (open-file fires earlier, but argv is always available).
+  // Windows/Linux cold-launch: a prateekterm:// URL may be passed in argv.
+  const argvUrl = process.argv.slice(1).find((a) => typeof a === 'string' && a.startsWith('prateekterm://'));
+
   const argvFolderPath = (() => {
     // Skip Electron/app internals — look for the first absolute path to an existing directory.
     const args = process.argv.slice(1);
@@ -590,7 +639,11 @@ app.whenReady().then(() => {
     return null;
   })();
 
-  if (argvFolderPath) {
+  if (argvUrl) {
+    dbgLog(`[argv] found protocol url: ${argvUrl}`);
+    // Defer until the window exists so handlePrateekTermUrl can queue/deliver.
+    setTimeout(() => handlePrateekTermUrl(argvUrl), 0);
+  } else if (argvFolderPath) {
     dbgLog(`[argv] found folder path: ${argvFolderPath}`);
     pendingFolderPaths.push(argvFolderPath);
   }
@@ -1271,27 +1324,59 @@ ipcMain.on('debug:rendererError', (_, msg) => {
 
 // ── Default Terminal IPC ─────────────────────────────────────────────────
 
+// Per-OS shell integration modules (lazy-required so a missing/foreign module
+// never breaks startup). macOS keeps the native LaunchServices addon; Windows
+// uses a registry context menu; Linux uses a .desktop entry.
+function getIntegration() {
+  if (platform.isWindows()) return require('./integrations/win-integrations');
+  if (platform.isLinux())   return require('./integrations/linux-integrations');
+  return null;
+}
+
 ipcMain.handle('defaultTerminal:isDefault', () => {
   dbgLog('[default-terminal] isDefault query');
-  if (!defaultTerminalAddon) return { isDefault: false, nativeAvailable: false };
-  return {
-    isDefault: defaultTerminalAddon.isDefaultTerminal(),
-    nativeAvailable: defaultTerminalAddon.nativeAvailable,
-    currentBundleId: defaultTerminalAddon.getDefaultTerminalBundleId(),
-  };
+  if (platform.isMac()) {
+    if (!defaultTerminalAddon) return { isDefault: false, nativeAvailable: false };
+    return {
+      isDefault: defaultTerminalAddon.isDefaultTerminal(),
+      nativeAvailable: defaultTerminalAddon.nativeAvailable,
+      currentBundleId: defaultTerminalAddon.getDefaultTerminalBundleId(),
+    };
+  }
+  // Windows/Linux: "is the Open in Prateek-Term integration installed?"
+  try {
+    const integ = getIntegration();
+    return { isDefault: integ ? integ.isRegistered() : false, nativeAvailable: true };
+  } catch (e) {
+    return { isDefault: false, nativeAvailable: false, error: e.message };
+  }
 });
 
 ipcMain.handle('defaultTerminal:set', () => {
   dbgLog('[default-terminal] set as default requested');
-  if (!defaultTerminalAddon || !defaultTerminalAddon.nativeAvailable) {
-    return { ok: false, error: 'Native addon not compiled. Run: npm run rebuild:native' };
+  if (platform.isMac()) {
+    if (!defaultTerminalAddon || !defaultTerminalAddon.nativeAvailable) {
+      return { ok: false, error: 'Native addon not compiled. Run: npm run rebuild:native' };
+    }
+    try {
+      defaultTerminalAddon.setDefaultTerminal();
+      dbgLog('[default-terminal] setDefaultTerminal() called');
+      return { ok: true };
+    } catch (e) {
+      dbgLog(`[default-terminal] setDefaultTerminal failed: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
   }
+  // Windows/Linux: install the "Open in Prateek-Term" integration for the
+  // current executable.
   try {
-    defaultTerminalAddon.setDefaultTerminal();
-    dbgLog('[default-terminal] setDefaultTerminal() called');
+    const integ = getIntegration();
+    if (!integ) return { ok: false, error: 'Unsupported platform' };
+    integ.register(app.getPath('exe'));
+    dbgLog('[default-terminal] integration registered');
     return { ok: true };
   } catch (e) {
-    dbgLog(`[default-terminal] setDefaultTerminal failed: ${e.message}`);
+    dbgLog(`[default-terminal] integration register failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
 });
