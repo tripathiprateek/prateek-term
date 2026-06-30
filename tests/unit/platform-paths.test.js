@@ -166,6 +166,27 @@ describe('chromePath', () => {
 // findShell
 // ---------------------------------------------------------------------------
 
+describe('resolveCommand', () => {
+  test('non-Windows returns the command unchanged', () => {
+    setPlatform('linux');
+    expect(platform.resolveCommand('ssh')).toBe('ssh');
+  });
+  test('Windows resolves bare ssh to the OpenSSH full path', () => {
+    setPlatform('win32');
+    const sshExe = require('path').join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe');
+    jest.spyOn(fs, 'existsSync').mockImplementation((p) => p === sshExe);
+    expect(platform.resolveCommand('ssh')).toBe(sshExe);
+  });
+  test('Windows leaves an absolute path untouched', () => {
+    setPlatform('win32');
+    expect(platform.resolveCommand('C:\\Windows\\System32\\cmd.exe')).toBe('C:\\Windows\\System32\\cmd.exe');
+  });
+  test('Windows leaves a name with extension untouched', () => {
+    setPlatform('win32');
+    expect(platform.resolveCommand('powershell.exe')).toBe('powershell.exe');
+  });
+});
+
 describe('findShell', () => {
   test('Unix returns first executable candidate', () => {
     setPlatform('linux');

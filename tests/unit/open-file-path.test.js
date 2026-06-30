@@ -59,13 +59,13 @@ describe('open-file handler — directory resolution', () => {
 describe('terminal:create handler — cwd directory validation', () => {
   test('PTY cwd validation calls .isDirectory() before spawning', () => {
     // The terminal:create handler must stat the cwd and check isDirectory()
-    const createBlock = source.match(/ipcMain\.handle\('terminal:create'[\s\S]{0,1500}/);
+    const createBlock = source.match(/ipcMain\.handle\('terminal:create'[\s\S]{0,2000}/);
     expect(createBlock).not.toBeNull();
     expect(createBlock[0]).toContain('isDirectory()');
   });
 
   test('If PTY cwd is a file, uses path.dirname to get parent directory', () => {
-    const createBlock = source.match(/ipcMain\.handle\('terminal:create'[\s\S]{0,1500}/);
+    const createBlock = source.match(/ipcMain\.handle\('terminal:create'[\s\S]{0,2000}/);
     expect(createBlock).not.toBeNull();
     expect(createBlock[0]).toContain('path.dirname(cwd)');
   });

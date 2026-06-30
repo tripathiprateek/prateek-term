@@ -687,7 +687,9 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   // the correct window — torn-off windows must NOT have data sent to mainWindow.
   const ownerContents = event.sender;
   const id = ++terminalIdCounter;
-  const shell = options.shell || findShell();
+  // Resolve bare command names (e.g. "ssh") to a full path — node-pty on Windows
+  // can't spawn a name that isn't an absolute path. No-op on macOS/Linux.
+  const shell = platform.resolveCommand(options.shell || findShell());
   // Login flag (-l) only applies to Unix shells; Windows shells take no login arg.
   const defaultArgs = platform.loginShellArgs();
   dbgLog(`[pty:${id}] create shell="${shell}" args=[${(options.args||defaultArgs).join(',')}] cwd="${options.cwd||'(default)'}" cols=${options.cols||80} rows=${options.rows||24} customCmd=${!!options.shell}`);
@@ -1537,7 +1539,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
 
   let proc;
   try {
-    proc = pty.spawn(wrapped.command, wrapped.args, {
+    proc = pty.spawn(platform.resolveCommand(wrapped.command), wrapped.args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 10,
@@ -1790,7 +1792,8 @@ function buildSSHCommandForProfile(profile) {
 }
 
 function spawnPtyForBridge(options) {
-  const shell    = options.shell || findShell();
+  // Resolve bare commands (ssh/scp/…) to a full path so node-pty can spawn them on Windows.
+  const shell    = platform.resolveCommand(options.shell || findShell());
   const args     = options.args  || ['-l'];
   let   cwd      = process.env.HOME || '/';
   const env      = { ...process.env, ...(options.env || {}) };

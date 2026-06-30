@@ -93,6 +93,25 @@ function shellExec(cmd) {
   return { shell: '/bin/sh', args: ['-c', cmd] };
 }
 
+/**
+ * Resolve a bare command name (e.g. "ssh") to a full executable path on Windows.
+ * node-pty's Windows (ConPTY) backend does NOT search PATH — spawning a bare
+ * "ssh" fails with "File not found". On macOS/Linux the name is returned
+ * unchanged (the PTY there resolves via PATH). Returns the original string if
+ * nothing better is found.
+ */
+function resolveCommand(cmd) {
+  if (!isWindows() || !cmd) return cmd;
+  // Already a path or carries an extension — use as-is.
+  if (cmd.includes('\\') || cmd.includes('/') || /\.[a-z0-9]+$/i.test(cmd)) return cmd;
+  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const candidates = [];
+  if (cmd === 'ssh' || cmd === 'scp' || cmd === 'sftp') {
+    candidates.push(path.join(sysRoot, 'System32', 'OpenSSH', `${cmd}.exe`));
+  }
+  return whichBin(`${cmd}.exe`, candidates) || whichBin(cmd, candidates) || cmd;
+}
+
 /** Absolute path to the Google Chrome / Chromium executable, or null. */
 function chromePath() {
   if (isMac()) {
@@ -156,6 +175,7 @@ module.exports = {
   findShell,
   loginShellArgs,
   shellExec,
+  resolveCommand,
   chromePath,
   claudeDesktopConfigPath,
   sshAgentSock,

@@ -51,7 +51,10 @@
     "asar": true,
     "asarUnpack": [
       "src/mcp/**",
-      "src/native/build/**"
+      "src/native/build/**",
+      "node_modules/serialport/**",
+      "node_modules/@serialport/**",
+      "node_modules/node-pty/**"
     ],
     "generateUpdatesFilesForAllChannels": false,
     "afterPack": "./build/afterPack.js",
@@ -169,7 +172,7 @@
       "shortcutName": "Prateek-Term"
     },
     "linux": {
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "category": "Utility;TerminalEmulator;System;",
       "maintainer": "Prateek Tripathi <tripathiprateek@gmail.com>",
       "synopsis": "Terminal emulator & SSH/serial connection manager",
