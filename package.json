@@ -25,6 +25,11 @@
   },
   "author": "Prateek",
   "license": "MIT",
+  "homepage": "https://github.com/tripathiprateek/prateek-term",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tripathiprateek/prateek-term.git"
+  },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
     "electron": "^28.0.0",
