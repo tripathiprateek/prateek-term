@@ -68,21 +68,28 @@ jobs:
           - os: macos-14
             name: macos
             flags: --mac
+          # Windows (both arches): npmRebuild=false + --ignore-scripts install.
+          # node-pty/serialport ship N-API win32 prebuilds (ABI-stable in
+          # Electron); letting npm/electron-builder compile them instead trips
+          # Node 22's .cmd-spawn block (EINVAL in node-gyp-build) and, on
+          # arm64, missing Spectre-mitigated libs.
           - os: windows-latest
             name: windows-x64
-            flags: --win --x64
+            flags: --win --x64 -c.npmRebuild=false
           - os: windows-11-arm
             name: windows-arm64
-            # npmRebuild=false: node-pty's N-API win32-arm64 prebuild works in
-            # Electron as-is; compiling it needs Spectre-mitigated libs the
-            # hosted image may lack. serialport is rebuilt explicitly below.
             flags: --win --arm64 -c.npmRebuild=false
           - os: ubuntu-latest
             name: linux-x64
             flags: --linux --x64
+          # linux-arm64: npmRebuild=false — electron-builder's `npm rebuild`
+          # re-runs node-pty's raw install script, which mis-targets x64
+          # (-m64) on this runner and its failure poisons the temp files the
+          # deb/fpm stage needs. npm ci already compiled node-pty correctly
+          # (N-API — Electron-safe); serialport uses its linux-arm64 prebuild.
           - os: ubuntu-24.04-arm
             name: linux-arm64
-            flags: --linux --arm64
+            flags: --linux --arm64 -c.npmRebuild=false
     runs-on: ${{ matrix.os }}
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -111,18 +118,20 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends ruby ruby-dev && sudo gem install --no-document fpm
 
       - name: Install dependencies
-        if: matrix.name != 'windows-arm64'
+        if: ${{ !startsWith(matrix.name, 'windows-') }}
         run: npm ci
 
-      - name: Install dependencies (windows-arm64)
-        if: matrix.name == 'windows-arm64'
-        # --ignore-scripts skips postinstall (which compiles node-pty — see the
-        # npmRebuild=false note above; its win32-arm64 N-API prebuild is used
-        # instead). serialport ships no win32-arm64 prebuild, so rebuild just
-        # that one module natively.
+      - name: Install dependencies (Windows — prebuilds only)
+        if: startsWith(matrix.name, 'windows-')
+        # --ignore-scripts skips the compile-happy install scripts (see the
+        # npmRebuild=false note in the matrix); the shipped win32 N-API
+        # prebuilds are used instead. Exception: serialport has no win32-arm64
+        # prebuild, so that one module is rebuilt natively on the arm runner.
         run: |
           npm ci --ignore-scripts
-          npx electron-rebuild -f --only @serialport/bindings-cpp
+          if [ "${{ matrix.name }}" = "windows-arm64" ]; then
+            npx electron-rebuild -f --only @serialport/bindings-cpp
+          fi
 
       - name: Build distribution
         # Per-matrix --win/--linux/--mac + arch flags target this runner only.
