@@ -19,7 +19,10 @@ const { spawnSync } = require('child_process');
 const path          = require('path');
 
 const ROOT  = path.resolve(__dirname, '..');
-const JEST  = path.join(ROOT, 'node_modules', '.bin', 'jest');
+// Jest's JS entry, run via process.execPath: the node_modules/.bin/jest shim
+// is a shell script (jest.cmd on Windows), so spawning it directly fails with
+// ENOENT on Windows.
+const JEST  = require.resolve('jest/bin/jest', { paths: [ROOT] });
 
 // ---------------------------------------------------------------------------
 // Named suites — shortcuts for common test categories
@@ -93,7 +96,7 @@ console.log(`${line}\n`);
 // Run Jest
 // ---------------------------------------------------------------------------
 
-const result = spawnSync(JEST, jestArgs, {
+const result = spawnSync(process.execPath, [JEST, ...jestArgs], {
   stdio:   'inherit',
   cwd:     ROOT,
   shell:   false,
