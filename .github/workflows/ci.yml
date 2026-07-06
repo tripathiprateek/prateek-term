@@ -2,10 +2,15 @@ name: CI / Release
 
 on:
   push:
-    branches: [main]
+    # feature/cross-platform-win-linux: temporary, to shake down the 5-job
+    # matrix before tagging a release — remove after merge.
+    branches: [main, feature/cross-platform-win-linux]
     tags: ['v*.*.*']
   pull_request:
     branches: [main]
+  # Manual pipeline test: builds all artifacts, never publishes (release job
+  # is tag-gated).
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,8 +52,11 @@ jobs:
         run: npm test
 
   # ─── Build installers per OS ──────────────────────────────────────────────
-  # node-pty / serialport native modules cannot be cross-compiled, so each OS
-  # builds on its own runner. electron-builder targets the host OS.
+  # node-pty / serialport native modules cannot be cross-compiled, so every
+  # OS/arch pair builds on its own native runner (windows-11-arm and
+  # ubuntu-24.04-arm are free for public repos). Explicit --x64/--arm64 flags
+  # override the multi-arch lists in package.json so each runner builds only
+  # its own architecture.
   build:
     name: Build (${{ matrix.name }})
     needs: test
@@ -59,10 +67,22 @@ jobs:
         include:
           - os: macos-14
             name: macos
+            flags: --mac
           - os: windows-latest
-            name: windows
+            name: windows-x64
+            flags: --win --x64
+          - os: windows-11-arm
+            name: windows-arm64
+            # npmRebuild=false: node-pty's N-API win32-arm64 prebuild works in
+            # Electron as-is; compiling it needs Spectre-mitigated libs the
+            # hosted image may lack. serialport is rebuilt explicitly below.
+            flags: --win --arm64 -c.npmRebuild=false
           - os: ubuntu-latest
-            name: linux
+            name: linux-x64
+            flags: --linux --x64
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            flags: --linux --arm64
     runs-on: ${{ matrix.os }}
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -83,21 +103,36 @@ jobs:
           cache: 'npm'
 
       - name: Install Linux packaging deps (deb)
-        if: matrix.name == 'linux'
+        if: startsWith(matrix.name, 'linux')
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fakeroot dpkg
 
+      - name: Install system fpm (arm64 — electron-builder's bundled fpm is x86-only)
+        if: matrix.name == 'linux-arm64'
+        run: sudo apt-get install -y --no-install-recommends ruby ruby-dev && sudo gem install --no-document fpm
+
       - name: Install dependencies
+        if: matrix.name != 'windows-arm64'
         run: npm ci
 
+      - name: Install dependencies (windows-arm64)
+        if: matrix.name == 'windows-arm64'
+        # --ignore-scripts skips postinstall (which compiles node-pty — see the
+        # npmRebuild=false note above; its win32-arm64 N-API prebuild is used
+        # instead). serialport ships no win32-arm64 prebuild, so rebuild just
+        # that one module natively.
+        run: |
+          npm ci --ignore-scripts
+          npx electron-rebuild -f --only @serialport/bindings-cpp
+
       - name: Build distribution
-        # No --mac/--win/--linux flag: electron-builder targets the host OS.
+        # Per-matrix --win/--linux/--mac + arch flags target this runner only.
         # --publish never — the release job handles GitHub Releases.
         # Retry up to 3× — hdiutil (mac DMG) / appimage steps can flake on CI.
         run: |
           npm run prebuild
           for attempt in 1 2 3; do
             echo "Build attempt $attempt..."
-            if npx electron-builder --publish never; then
+            if npx electron-builder ${{ matrix.flags }} --publish never; then
               echo "Build succeeded on attempt $attempt"
               break
             fi
@@ -109,6 +144,8 @@ jobs:
           # macOS: ad-hoc signing is done in build/afterPack.js — stop
           # electron-builder from hunting for a Developer ID cert.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # linux-arm64: use the system fpm installed above.
+          USE_SYSTEM_FPM: ${{ matrix.name == 'linux-arm64' }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -181,8 +218,9 @@ jobs:
           | Platform | File |
           |----------|------|
           | macOS (Apple Silicon) | \`Prateek-Term-${VERSION}-arm64.dmg\` |
-          | Windows | \`Prateek-Term Setup ${VERSION}.exe\` (installer) / portable .exe |
-          | Linux | \`Prateek-Term-${VERSION}.AppImage\` / \`.deb\` |
+          | Windows x64 | \`Prateek-Term-Setup-${VERSION}-x64.exe\` (installer) / \`-portable.exe\` |
+          | Windows ARM64 | \`Prateek-Term-Setup-${VERSION}-arm64.exe\` (installer) / \`-portable.exe\` |
+          | Linux x64 / ARM64 | \`Prateek-Term-${VERSION}[-arm64].AppImage\` / \`.deb\` |
 
           > **macOS:** ad-hoc signed — right-click the app -> Open -> Open anyway if Gatekeeper warns.
           > **Windows:** unsigned — click \"More info\" -> \"Run anyway\" on the SmartScreen prompt.
