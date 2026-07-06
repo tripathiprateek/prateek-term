@@ -1,0 +1,9 @@
+# Force LF on checkout everywhere (including Windows CI runners, which default
+# to autocrlf). The source-contract tests match source text with bounded
+# regex windows — CRLF inflates every line by one char and breaks them.
+* text=auto eol=lf
+
+# Binary assets — never translate.
+*.png binary
+*.ico binary
+*.icns binary

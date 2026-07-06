@@ -62,10 +62,15 @@ describe('loginShellArgs', () => {
 // claudeDesktopConfigPath
 // ---------------------------------------------------------------------------
 
+// path.join uses the HOST's separator even when process.platform is mocked,
+// so normalize to forward slashes before matching (keeps these green on a
+// Windows test host).
+const fwd = (p) => p.replace(/\\/g, '/');
+
 describe('claudeDesktopConfigPath', () => {
   test('macOS uses Library/Application Support/Claude', () => {
     setPlatform('darwin');
-    expect(platform.claudeDesktopConfigPath()).toMatch(/Library\/Application Support\/Claude\/claude_desktop_config\.json$/);
+    expect(fwd(platform.claudeDesktopConfigPath())).toMatch(/Library\/Application Support\/Claude\/claude_desktop_config\.json$/);
   });
   test('Windows uses APPDATA\\Claude', () => {
     setPlatform('win32');
@@ -79,7 +84,7 @@ describe('claudeDesktopConfigPath', () => {
     setPlatform('linux');
     const prev = process.env.XDG_CONFIG_HOME;
     delete process.env.XDG_CONFIG_HOME;
-    expect(platform.claudeDesktopConfigPath()).toMatch(/\.config\/Claude\/claude_desktop_config\.json$/);
+    expect(fwd(platform.claudeDesktopConfigPath())).toMatch(/\.config\/Claude\/claude_desktop_config\.json$/);
     if (prev !== undefined) process.env.XDG_CONFIG_HOME = prev;
   });
 });
