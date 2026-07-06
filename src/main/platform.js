@@ -104,6 +104,10 @@ function resolveCommand(cmd) {
   if (!isWindows() || !cmd) return cmd;
   // Already a path or carries an extension — use as-is.
   if (cmd.includes('\\') || cmd.includes('/') || /\.[a-z0-9]+$/i.test(cmd)) return cmd;
+  // Only plain names may be looked up: whichBin shells out (`where ${name}`),
+  // so anything with shell metacharacters must never reach it. pty.spawn does
+  // no shell interpretation, so returning the string unchanged is safe.
+  if (!/^[\w+-]+$/.test(cmd)) return cmd;
   const sysRoot = process.env.SystemRoot || 'C:\\Windows';
   const candidates = [];
   if (cmd === 'ssh' || cmd === 'scp' || cmd === 'sftp') {

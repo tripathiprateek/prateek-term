@@ -1795,7 +1795,9 @@ function spawnPtyForBridge(options) {
   // Resolve bare commands (ssh/scp/…) to a full path so node-pty can spawn them on Windows.
   const shell    = platform.resolveCommand(options.shell || findShell());
   const args     = options.args  || ['-l'];
-  let   cwd      = process.env.HOME || '/';
+  // os.homedir() works on every platform; $HOME is Unix-only (unset on
+  // Windows, where the old '/' fallback was an invalid cwd).
+  let   cwd      = os.homedir() || '/';
   const env      = { ...process.env, ...(options.env || {}) };
   env.TERM       = 'xterm-256color';
   env.COLORTERM  = 'truecolor';

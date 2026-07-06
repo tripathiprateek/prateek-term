@@ -185,6 +185,15 @@ describe('resolveCommand', () => {
     setPlatform('win32');
     expect(platform.resolveCommand('powershell.exe')).toBe('powershell.exe');
   });
+  test('Windows never shells out for names with metacharacters', () => {
+    setPlatform('win32');
+    // A hostile "command" must not reach execSync (`where ${name}` would let
+    // cmd.exe interpret & | > etc.). It comes back unchanged: pty.spawn does
+    // no shell interpretation, so passing it through is safe.
+    expect(platform.resolveCommand('ssh & calc')).toBe('ssh & calc');
+    expect(platform.resolveCommand('foo|bar')).toBe('foo|bar');
+    expect(cp.execSync).not.toHaveBeenCalled();
+  });
 });
 
 describe('findShell', () => {
