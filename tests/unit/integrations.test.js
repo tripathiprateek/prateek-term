@@ -68,8 +68,11 @@ describe('linux-integrations', () => {
     const sp = linux.nautilusScriptPath();
     expect(sp).toBe(path.join(tmp, 'nautilus', 'scripts', 'Open in Prateek-Term'));
     expect(fs.existsSync(sp)).toBe(true);
-    const st = fs.statSync(sp);
-    expect(st.mode & 0o111).toBeTruthy(); // executable bit set
+    // POSIX-only: Windows filesystems have no executable bit. The Nautilus
+    // script is a Linux feature; the bit is set via mode 0o755 on real installs.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(sp).mode & 0o111).toBeTruthy();
+    }
     const body = fs.readFileSync(sp, 'utf8');
     expect(body).toContain("exe='/opt/Prateek-Term/prateek-term'");
     expect(body).toContain('NAUTILUS_SCRIPT_SELECTED_FILE_PATHS');
