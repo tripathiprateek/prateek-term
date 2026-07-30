@@ -733,9 +733,9 @@
 <!-- ╚══════════════════════════════╝ -->
 <div class="page-wrap">
   <div class="hero">
-    <div class="hero-badge">User Guide · v1.4.0</div>
+    <div class="hero-badge">User Guide</div>
     <h1>Prateek-Term</h1>
-    <p class="hero-sub">A macOS terminal emulator &amp; SSH connection manager — every feature explained with live demos.</p>
+    <p class="hero-sub">A cross-platform terminal emulator &amp; SSH / serial connection manager for macOS, Windows, and Linux — every feature explained with live demos.</p>
   </div>
 
   <!-- ── Table of Contents ── -->
@@ -757,9 +757,15 @@
       <li><a href="#settings">Settings &amp; Themes</a></li>
       <li><a href="#mcp">AI / MCP Integration</a></li>
       <li><a href="#session-persistence">Session Persistence</a></li>
-      <li><a href="#default-terminal">Default Terminal (macOS)</a></li>
+      <li><a href="#default-terminal">Default Terminal &amp; OS Integration</a></li>
     </ol>
   </nav>
+
+  <!-- ── Platform note ── -->
+  <div class="tip" style="margin:0 0 8px;">
+    <span class="tip-icon">🖥️</span>
+    <p><strong>Cross-platform.</strong> Prateek-Term runs on macOS, Windows, and Linux. Shortcuts below are shown with <kbd>⌘</kbd> (macOS) — use <kbd>Ctrl</kbd> in their place on Windows and Linux. Where this guide says "Finder", read "File Explorer" on Windows or your file manager on Linux. Native OS integrations differ per platform and are covered in <a href="#default-terminal" style="color:var(--accent); text-decoration:none;">Default Terminal &amp; OS Integration</a>.</p>
+  </div>
 
   <!-- ════════════════════════════════════════════
        1 — TABS & LOCAL TERMINALS
@@ -795,12 +801,12 @@
       </div>
       <div class="feature-desc">
         <h3>Multi-tab workflow</h3>
-        <p>Every tab is a full PTY — resize, scroll, paste, and log independently. When Prateek-Term is set as your <a href="#default-terminal" style="color:var(--accent); text-decoration:none;">default terminal</a>, right-clicking any folder in Finder's path bar and choosing <strong>Open in Terminal</strong> opens a new tab directly at that folder path.</p>
+        <p>Every tab is a full PTY — resize, scroll, paste, and log independently. When Prateek-Term is set up for <a href="#default-terminal" style="color:var(--accent); text-decoration:none;">OS integration</a>, right-clicking a folder in your file manager and choosing <strong>Open in Prateek-Term</strong> opens a new tab directly at that folder path.</p>
         <ul class="steps">
-          <li><span class="step-num">1</span>Press <kbd>⌘T</kbd> to open a new local terminal tab.</li>
+          <li><span class="step-num">1</span>Press <kbd>⌘T</kbd> (<kbd>Ctrl+T</kbd> on Windows/Linux) to open a new local terminal tab.</li>
           <li><span class="step-num">2</span>Click any tab to switch; the terminal resizes to fit automatically.</li>
-          <li><span class="step-num">3</span>Middle-click a tab to close it.</li>
-          <li><span class="step-num">4</span>Drag tabs to reorder them.</li>
+          <li><span class="step-num">3</span>Middle-click a tab to close it, or right-click for close-others / close-left / close-right.</li>
+          <li><span class="step-num">4</span>Drag tabs to reorder — or drag one below the tab bar to tear it off into its own window (the live session moves with it, no reconnect).</li>
         </ul>
       </div>
     </div>
@@ -881,6 +887,10 @@
           <li><strong style="color:var(--text-secondary,#cdd6f4);">💾 Save</strong> — appears automatically on the first keystroke or field change, indicating unsaved edits.</li>
           <li><strong style="color:#a6e3a1;">✓ Saved</strong> — flashes green for 2 s after a successful save, then reverts to <em>Close</em>.</li>
         </ul>
+        <div class="tip" style="margin-top:14px;">
+          <span class="tip-icon">⧉</span>
+          <p><strong>Duplicate a profile:</strong> right-click any host in the sidebar → <strong>Duplicate</strong>. The clone keeps every detail — host, port, username, password, key, actions, tags, and all options (SSH flags, jump host, port-forwards, Cloudflare, SCP settings) — under a suggested unique name, opened for a quick rename.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -955,7 +965,12 @@
 
     <div class="tip">
       <span class="tip-icon">💡</span>
-      <p><strong>Drag-and-drop SCP upload:</strong> while connected via SSH, drag files from Finder onto the terminal window. Prateek-Term tracks the remote shell's current directory via OSC 7 — drag-drop SCP uploads land in your active remote directory automatically.</p>
+      <p><strong>Drag-and-drop SCP upload:</strong> while connected via SSH, drag files or folders from your file manager onto the terminal window. Prateek-Term tracks the remote shell's current directory via OSC 7 — drag-drop SCP uploads land in your active remote directory automatically, with a live progress overlay.</p>
+    </div>
+
+    <div class="tip" style="background:rgba(250,179,135,0.08); border-color:rgba(250,179,135,0.25);">
+      <span class="tip-icon">🔐</span>
+      <p><strong>Cloudflare Access:</strong> enable <em>Connect via Cloudflare Access</em> on an SSH profile to tunnel through <code>cloudflared</code> (zero-trust, no open ports). Because the tunnel runs <code>cloudflared</code> non-interactively, it needs a valid Access token — if none is cached, Prateek-Term opens your browser to sign in <strong>before</strong> connecting. If a connection still fails, the terminal shows a plain-English hint (login required, the tunnel origin is down, or a TLS-inspecting firewall is intercepting the host).</p>
     </div>
   </div>
 
@@ -978,7 +993,7 @@
           <div class="mock-form" style="padding:14px; gap:8px;">
             <!-- Network diagram -->
             <div style="background:#1e1e2e; border:1px solid #3a3a5c; border-radius:8px; padding:10px 14px; font-family:monospace; font-size:12px; color:#7f849c; text-align:center; letter-spacing:0.02em;">
-              <span style="color:#89b4fa;">Mac</span>
+              <span style="color:#89b4fa;">You</span>
               <span style="color:#3a3a5c;"> ──ssh──▶ </span>
               <span style="color:#a6e3a1;">Jump Host</span>
               <span style="color:#6c7086;"> (192.168.1.96)</span>
@@ -1016,7 +1031,7 @@
         <ul class="steps">
           <li><span class="step-num">1</span><strong>Agent / Ask</strong> — use the running SSH agent or fall back to an interactive password prompt.</li>
           <li><span class="step-num">2</span><strong>Key File</strong> — specify a dedicated identity file for the jump host; the target host uses its own separate auth.</li>
-          <li><span class="step-num">3</span><strong>Password</strong> — supply a password for the jump host; requires <code>sshpass</code> to be installed (<code>brew install sshpass</code>).</li>
+          <li><span class="step-num">3</span><strong>Password</strong> — supply a password for the jump host; requires <code>sshpass</code> (macOS: <code>brew install sshpass</code>, Debian/Ubuntu: <code>apt install sshpass</code>). Not available on Windows — use <strong>Agent / Ask</strong> or <strong>Key File</strong> there.</li>
         </ul>
         <div class="tip" style="margin-top:12px;">
           <span class="tip-icon">⚠️</span>
@@ -1080,8 +1095,8 @@
         <h3>Three rule types</h3>
         <ul class="steps">
           <li><span class="step-num">1</span><strong>Dynamic (SOCKS5)</strong> — Opens a SOCKS5 proxy on the given local port. Route any app or browser through it to access hosts only reachable from the SSH server. Point Chrome to <code>127.0.0.1:&lt;port&gt;</code>.</li>
-          <li><span class="step-num">2</span><strong>Local Forward</strong> — Binds a local port and tunnels connections to a remote <code>host:port</code> via the SSH server. Access a router admin page, a database, or any service on the remote network as if it were on your Mac.</li>
-          <li><span class="step-num">3</span><strong>Remote Forward</strong> — Binds a port on the SSH server and forwards connections back to a local address. Lets the remote host (or others who can reach it) connect to a service running on your Mac.</li>
+          <li><span class="step-num">2</span><strong>Local Forward</strong> — Binds a local port and tunnels connections to a remote <code>host:port</code> via the SSH server. Access a router admin page, a database, or any service on the remote network as if it were running locally.</li>
+          <li><span class="step-num">3</span><strong>Remote Forward</strong> — Binds a port on the SSH server and forwards connections back to a local address. Lets the remote host (or others who can reach it) connect to a service running on your local machine.</li>
         </ul>
       </div>
     </div>
@@ -1262,13 +1277,17 @@
       </div>
       <div class="feature-desc">
         <h3>Serial console</h3>
-        <p>Prateek-Term auto-discovers all available serial ports on your Mac. Pick a port, set the baud rate, and connect — the terminal opens instantly.</p>
+        <p>Prateek-Term auto-discovers all available serial ports on your machine — <code>/dev/tty.*</code> on macOS, <code>/dev/ttyUSB*</code> / <code>/dev/ttyACM*</code> on Linux, and <code>COM</code> ports on Windows. Pick a port, set the baud rate, and connect — the terminal opens instantly.</p>
         <ul class="steps">
           <li><span class="step-num">1</span>Set Protocol → <strong>Serial</strong> in the connection form.</li>
-          <li><span class="step-num">2</span>Choose your port from the dropdown — refreshed on every form open.</li>
-          <li><span class="step-num">3</span>Set baud rate (default 115200), data bits, parity, and flow control.</li>
+          <li><span class="step-num">2</span>Choose your port from the dropdown — hit ↻ to rescan.</li>
+          <li><span class="step-num">3</span>Set baud rate (default 115200), data bits, stop bits, parity, and flow control.</li>
           <li><span class="step-num">4</span>Click <strong>Connect</strong> — a serial tab opens with the device prompt.</li>
         </ul>
+        <div class="tip" style="margin-top:12px;">
+          <span class="tip-icon">🔎</span>
+          <p><strong>Live output filter:</strong> right-click a serial tab → <strong>Filter Output…</strong> to show only lines matching a substring or regex (toggle <code>.*</code> for regex). A match counter shows how many lines pass; logging still captures the full raw stream.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -1614,11 +1633,14 @@
                 <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Colour Theme</div>
                 <div class="mock-theme-swatches">
                   <div class="mock-theme-swatch active theme-swatch-active" style="background:#1e1e2e;" title="Catppuccin Mocha"></div>
-                  <div class="mock-theme-swatch" style="background:#1c1c1c;" title="One Dark Pro"></div>
+                  <div class="mock-theme-swatch" style="background:#282a36;" title="Dracula"></div>
+                  <div class="mock-theme-swatch" style="background:#2e3440;" title="Nord"></div>
+                  <div class="mock-theme-swatch" style="background:#282c34;" title="One Dark"></div>
+                  <div class="mock-theme-swatch" style="background:#1a1b26;" title="Tokyo Night"></div>
                   <div class="mock-theme-swatch" style="background:#002b36;" title="Solarized Dark"></div>
-                  <div class="mock-theme-swatch" style="background:#292d3e;" title="Material Ocean"></div>
-                  <div class="mock-theme-swatch" style="background:#0d1117;" title="GitHub Dark"></div>
-                  <div class="mock-theme-swatch" style="background:#011627;" title="Night Owl"></div>
+                  <div class="mock-theme-swatch" style="background:#ffffff;" title="GitHub Light"></div>
+                  <div class="mock-theme-swatch" style="background:#eff1f5;" title="Catppuccin Latte"></div>
+                  <div class="mock-theme-swatch" style="background:#faf4ed;" title="Rosé Pine Dawn"></div>
                 </div>
               </div>
               <div class="mock-settings-card settings-card" style="max-width:none; animation-delay:0.7s;">
@@ -1630,7 +1652,7 @@
               <div class="mock-settings-card settings-card" style="max-width:none; animation-delay:1.0s;">
                 <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">Connection Storage</div>
                 <div class="mock-settings-row">
-                  <div class="mock-input" style="flex:1; font-size:11px; color:#7f849c;">~/Library/…/profiles.json</div>
+                  <div class="mock-input" style="flex:1; font-size:11px; color:#7f849c;">…/connection-profiles.json</div>
                   <div class="mock-btn secondary" style="font-size:11px; padding:4px 10px; flex-shrink:0;">Browse…</div>
                 </div>
               </div>
@@ -1640,17 +1662,21 @@
       </div>
       <div class="feature-desc">
         <h3>Settings — <kbd>⌘,</kbd></h3>
+        <p style="margin-bottom:10px;">The Settings panel has five tabs: <strong>General</strong> (OS integration, tab organization, connection storage), <strong>Appearance</strong> (themes), <strong>Data</strong> (import/export), <strong>AI/MCP</strong>, and <strong>Developer</strong> (debug log).</p>
         <ul class="steps">
-          <li><span class="step-num">1</span><strong>Colour Theme</strong> — click any swatch for an instant live preview.</li>
-          <li><span class="step-num">2</span><strong>Connection Storage</strong> — change where profiles are saved (e.g. to a synced folder). Existing hosts are migrated automatically.</li>
-          <li><span class="step-num">3</span><strong>Debug Logging</strong> — enable to capture a log file for bug reports. Use "Show in Finder" to locate it.</li>
+          <li><span class="step-num">1</span><strong>Colour Theme</strong> — choose from <strong>15 built-in themes</strong> (7 dark, 8 light); click any swatch for an instant live preview.</li>
+          <li><span class="step-num">2</span><strong>Connection Storage</strong> — change where profiles are saved (e.g. to a Dropbox/iCloud folder for sync). Existing hosts are migrated automatically.</li>
+          <li><span class="step-num">3</span><strong>Debug Logging</strong> — enable to capture a rotating log file for bug reports; the log viewer offers Copy, Rotate, Clear, and reveal-in-file-manager.</li>
         </ul>
         <div class="tip" style="margin-top:14px;">
           <span class="tip-icon">⌨️</span>
-          <p><strong>Keyboard shortcuts:</strong>
+          <p><strong>Keyboard shortcuts</strong> (use <kbd>Ctrl</kbd> instead of <kbd>⌘</kbd> on Windows/Linux):
             <kbd>⌘K</kbd> Connection Manager ·
             <kbd>⌘T</kbd> New Tab ·
+            <kbd>⌘W</kbd> Close Tab ·
             <kbd>⌘B</kbd> Toggle Sidebar ·
+            <kbd>⌘1</kbd>–<kbd>⌘9</kbd> Jump to Tab ·
+            <kbd>⌘/</kbd> Help ·
             <kbd>⌘,</kbd> Settings
           </p>
         </div>
@@ -1704,14 +1730,14 @@
             <div style="position:absolute; top:8px; right:12px; font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#cba6f7; background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); padding:2px 8px; border-radius:12px;">AI Agent</div>
             <div style="animation:fadeUp 0.4s 0.4s both;"><span style="color:#cba6f7;">&#9656;</span> <span style="color:#7f849c;">upload_file</span></div>
             <div style="animation:fadeUp 0.4s 0.8s both; padding-left:16px;"><span style="color:#7f849c;">profileName:</span> <span style="color:#cdd6f4;">"edge-gateway"</span></div>
-            <div style="animation:fadeUp 0.4s 1.2s both; padding-left:16px;"><span style="color:#7f849c;">localPath:</span> <span style="color:#cdd6f4;">"/tmp/firmware-v2.4.bin"</span></div>
+            <div style="animation:fadeUp 0.4s 1.2s both; padding-left:16px;"><span style="color:#7f849c;">localPath:</span> <span style="color:#cdd6f4;">"~/firmware/edge-gateway.bin"</span></div>
             <div style="animation:fadeUp 0.4s 1.6s both; padding-left:16px;"><span style="color:#7f849c;">remotePath:</span> <span style="color:#cdd6f4;">"/opt/firmware/"</span></div>
             <div style="animation:slideInRight 0.5s 2.2s both; display:flex; align-items:center; gap:8px; margin-top:6px;">
               <span style="color:#a6e3a1;">&#10003;</span>
               <span class="mock-out">transferred 4.2 MB via SCP</span>
             </div>
             <div style="animation:fadeUp 0.4s 2.8s both; margin-top:10px; display:flex; align-items:center; justify-content:center; gap:12px;">
-              <span style="background:rgba(137,180,250,0.15); border:1px solid rgba(137,180,250,0.3); color:#89b4fa; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:600;">Mac</span>
+              <span style="background:rgba(137,180,250,0.15); border:1px solid rgba(137,180,250,0.3); color:#89b4fa; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:600;">Local</span>
               <span style="color:#7f849c; font-size:11px;">&#8594; SCP &#8594;</span>
               <span style="background:rgba(203,166,247,0.15); border:1px solid rgba(203,166,247,0.3); color:#cba6f7; padding:4px 10px; border-radius:8px; font-size:11px; font-weight:600;">Remote Device</span>
             </div>
@@ -1811,6 +1837,8 @@
           <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_profiles</span><span style="color:var(--text-muted);">List AI-accessible profiles</span></div>
           <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_sessions</span><span style="color:var(--text-muted);">List active sessions</span></div>
           <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">list_serial_ports</span><span style="color:var(--text-muted);">Discover serial devices</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">add_profile</span><span style="color:var(--text-muted);">Create a new connection profile</span></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px;"><span style="color:#cba6f7; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:rgba(203,166,247,0.1); padding:2px 8px; border-radius:6px;">remove_profile</span><span style="color:var(--text-muted);">Delete a saved profile</span></div>
         </div>
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">&#128161;</span>
@@ -1830,7 +1858,7 @@
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>get_status</strong> reports session state: <code style="color:#f9e2af;">idle</code>, <code style="color:#a6e3a1;">running_command</code>, <code style="color:#cba6f7;">waiting_for_input</code>, or <code style="color:#f38ba8;">disconnected</code>.</li>
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>upload_file</strong> and <strong>download_file</strong> transfer files via SCP using the saved profile credentials.</li>
           <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>send_input</strong> delivers raw bytes directly to the PTY for reliable prompt handling.</li>
-          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>Path safety</strong> — local file paths are restricted to <code>$HOME</code> and <code>/tmp</code> to prevent unintended access.</li>
+          <li><span class="step-num" style="background:rgba(203,166,247,0.15); border-color:rgba(203,166,247,0.3); color:#cba6f7;">&#10003;</span><strong>Path safety</strong> — local file paths for transfers are restricted to your home directory and the system temp directory to prevent unintended access.</li>
         </ul>
         <div class="tip" style="margin-top:14px; background:rgba(203,166,247,0.08); border-color:rgba(203,166,247,0.2);">
           <span class="tip-icon">&#128268;</span>
@@ -1920,20 +1948,30 @@
         </div>
         <div class="tip">
           <span class="tip-icon">&#128196;</span>
-          <p><strong>Storage location:</strong> Session data is stored at <code style="color:var(--accent); font-family:'SF Mono','Fira Code',monospace;">~/Library/Application Support/prateek-term/session.json</code>. To clear the saved session, close all tabs before quitting — an empty tab state means nothing is saved.</p>
+          <p><strong>Storage location:</strong> Session data is stored as <code style="color:var(--accent); font-family:'SF Mono','Fira Code',monospace;">session.json</code> in the app's user-data folder — macOS <code>~/Library/Application Support/Prateek-Term/</code>, Windows <code>%APPDATA%\Prateek-Term\</code>, Linux <code>~/.config/Prateek-Term/</code>. To clear the saved session, close all tabs before quitting — an empty tab state means nothing is saved.</p>
         </div>
       </div>
     </div>
   </div>
 
   <!-- ════════════════════════════════════════════
-       13 — DEFAULT TERMINAL (macOS)
+       13 — DEFAULT TERMINAL & OS INTEGRATION
   ════════════════════════════════════════════ -->
   <div class="divider"></div>
   <div class="section" id="default-terminal">
     <div class="section-label">13</div>
-    <h2>Default Terminal (macOS)</h2>
-    <p class="section-intro">Make Prateek-Term the terminal that opens when you choose "Open in Terminal" from Finder, double-click shell scripts, or trigger any macOS "open in terminal" action.</p>
+    <h2>Default Terminal &amp; OS Integration</h2>
+    <p class="section-intro">Wire Prateek-Term into your operating system so you can open a terminal at any folder straight from your file manager, and open <code>prateekterm://</code> links. Each platform integrates differently — one click in <strong>Settings → General</strong> sets it up.</p>
+
+    <div class="tip" style="margin-bottom:6px;">
+      <span class="tip-icon">🧩</span>
+      <p><strong>Per-platform integration:</strong></p>
+      <ul style="margin:6px 0 0 4px; padding-left:16px; line-height:1.8; font-size:13px;">
+        <li><strong>macOS</strong> — become the system <em>default terminal</em> (Finder "Open in Terminal", double-clicked <code>.sh</code>/<code>.command</code> scripts) and install a Finder Services / Quick Action entry.</li>
+        <li><strong>Windows</strong> — add an <strong>"Open in Prateek-Term"</strong> entry to the folder (and folder-background) right-click menu in File Explorer.</li>
+        <li><strong>Linux</strong> — install a <code>.desktop</code> entry so Prateek-Term appears in your app menu, handles <code>prateekterm://</code> links, and offers file-manager "open here" actions (exact menu depends on your desktop environment).</li>
+      </ul>
+    </div>
 
     <!-- Feature 1: Set as default -->
     <div class="feature-grid">
@@ -1945,32 +1983,29 @@
               <div class="mock-title">Settings — General</div>
             </div>
             <div class="mock-form" style="padding:14px; gap:10px;">
+              <div style="font-size:11px; font-weight:700; color:#7f849c; text-transform:uppercase; letter-spacing:0.08em;">OS Integration</div>
               <div class="mock-settings-row">
-                <div class="mock-settings-label">Startup shell</div>
-                <div class="mock-settings-value">/bin/zsh</div>
-              </div>
-              <div class="mock-settings-row">
-                <div class="mock-settings-label">Font size</div>
-                <div class="mock-settings-value">13 px</div>
+                <div class="mock-settings-label">Status</div>
+                <div class="mock-settings-value" style="color:#7f849c;">Not set up</div>
               </div>
               <div style="margin-top:6px;">
                 <div class="mock-btn primary" style="animation:pulseGlow 1.8s 0.8s infinite; font-size:12px;">&#128204; Set as Default Terminal</div>
               </div>
               <div style="animation:fadeUp 0.4s 1.6s both; display:flex; align-items:center; gap:6px; font-size:12px;">
                 <span style="color:#a6e3a1;">&#10003;</span>
-                <span style="color:#cdd6f4;">System dialog confirmed</span>
+                <span style="color:#cdd6f4;">Integration enabled</span>
               </div>
             </div>
           </div>
         </div>
         <div class="feature-desc">
-          <h3>Via Settings</h3>
-          <p>The fastest way: open Settings, go to the General tab, and click <strong>Set as Default Terminal</strong>. A macOS system confirmation dialog will appear — click OK to confirm.</p>
+          <h3>Via Settings (all platforms)</h3>
+          <p>The fastest way: open Settings, go to the General tab, and click the OS-integration button. Its label follows your platform — <strong>Set as Default Terminal</strong> (macOS), <strong>Add to Explorer menu</strong> (Windows), or <strong>Register with desktop</strong> (Linux).</p>
           <ul class="steps">
-            <li><span class="step-num">1</span>Open Settings (<kbd>⌘,</kbd>).</li>
+            <li><span class="step-num">1</span>Open Settings (<kbd>⌘,</kbd> / <kbd>Ctrl+,</kbd>).</li>
             <li><span class="step-num">2</span>Go to the <strong>General</strong> tab.</li>
-            <li><span class="step-num">3</span>Click <strong>Set as Default Terminal</strong>.</li>
-            <li><span class="step-num">4</span>Confirm in the macOS system dialog.</li>
+            <li><span class="step-num">3</span>Click the integration button for your OS.</li>
+            <li><span class="step-num">4</span>On macOS, confirm the system dialog if prompted.</li>
           </ul>
         </div>
       </div>
@@ -1991,8 +2026,8 @@
           </div>
         </div>
         <div class="feature-desc">
-          <h3>Via System Settings</h3>
-          <p>Alternatively, set it manually: open <strong>System Settings → General → Default Apps → Terminal</strong> and select Prateek-Term from the list. To revert, select Terminal.app from the same menu.</p>
+          <h3>macOS: via System Settings</h3>
+          <p>On macOS you can also set it manually: open <strong>System Settings → General → Default Apps → Terminal</strong> and select Prateek-Term from the list. To revert, choose Terminal.app from the same menu.</p>
         </div>
       </div>
     </div>
@@ -2030,17 +2065,16 @@
         </div>
       </div>
       <div class="feature-desc">
-        <h3>What becomes available once set as default</h3>
-        <p style="margin-bottom:12px;">After setting Prateek-Term as the system default terminal, the following all open a new tab at the correct path:</p>
+        <h3>What becomes available (macOS example shown)</h3>
+        <p style="margin-bottom:12px;">Once integration is set up, opening a folder in a terminal is one right-click away. The exact entry point depends on your platform:</p>
         <ul class="steps">
-          <li><span class="step-num">&#10003;</span>Finder path-bar right-click → <strong>Open in Terminal</strong> opens at that exact folder.</li>
-          <li><span class="step-num">&#10003;</span>Double-clicking <code style="font-family:'SF Mono','Fira Code',monospace;">.sh</code>, <code style="font-family:'SF Mono','Fira Code',monospace;">.command</code>, or <code style="font-family:'SF Mono','Fira Code',monospace;">.zsh</code> files runs them in a new tab.</li>
-          <li><span class="step-num">&#10003;</span><code style="font-family:'SF Mono','Fira Code',monospace;">open -b com.prateek.prateekterm /path</code> opens a tab at the specified path.</li>
-          <li><span class="step-num">&#10003;</span>Finder Services menu shows <strong>New Prateek-Term Window Here</strong> / <strong>New Prateek-Term Tab Here</strong> (install the Automator Quick Action from the Help menu).</li>
+          <li><span class="step-num">&#10003;</span><strong>macOS</strong> — Finder path-bar right-click → <strong>Open in Terminal</strong>; double-clicking <code style="font-family:'SF Mono','Fira Code',monospace;">.sh</code>/<code style="font-family:'SF Mono','Fira Code',monospace;">.command</code> scripts; <code style="font-family:'SF Mono','Fira Code',monospace;">open -b com.prateek.prateekterm /path</code>; the Finder Services entries <strong>New Prateek-Term Window / Tab Here</strong>.</li>
+          <li><span class="step-num">&#10003;</span><strong>Windows</strong> — right-click a folder (or empty space inside one) in File Explorer → <strong>Open in Prateek-Term</strong>.</li>
+          <li><span class="step-num">&#10003;</span><strong>Linux</strong> — the app-menu launcher, <code style="font-family:'SF Mono','Fira Code',monospace;">prateekterm://</code> links, and (per desktop environment) a file-manager "open here" action.</li>
         </ul>
         <div class="tip">
           <span class="tip-icon">&#8617;</span>
-          <p><strong>To revert:</strong> Open <strong>System Settings → General → Default Apps → Terminal</strong> and select Terminal.app.</p>
+          <p><strong>To revert (macOS):</strong> open <strong>System Settings → General → Default Apps → Terminal</strong> and select Terminal.app. On Windows/Linux, use the same Settings → General button to remove the integration.</p>
         </div>
       </div>
     </div>
@@ -2048,7 +2082,7 @@
 
   <!-- ── Footer ── -->
   <div class="footer">
-    <p>Prateek-Term v1.4.0 · Built for macOS · &copy; 2026 Prateek Tripathi</p>
+    <p>Prateek-Term · macOS · Windows · Linux · &copy; 2026 Prateek Tripathi</p>
     <p style="margin-top:6px;">tripathiprateek@gmail.com</p>
   </div>
 
@@ -2066,17 +2100,6 @@
     });
   }, { threshold: 0.15 });
   document.querySelectorAll('.section').forEach(s => observer.observe(s));
-
-  // Inject live version from URL param ?v=x.x.x passed by main process.
-  // Falls back to the hardcoded string already in the DOM.
-  (() => {
-    const v = new URLSearchParams(window.location.search).get('v');
-    if (!v) return;
-    const badge = document.querySelector('.hero-badge');
-    if (badge) badge.textContent = `User Guide · v${v}`;
-    const footer = document.querySelector('.footer p');
-    if (footer) footer.textContent = `Prateek-Term v${v} · Built for macOS · © 2026 Prateek Tripathi`;
-  })();
 </script>
 </body>
 </html>

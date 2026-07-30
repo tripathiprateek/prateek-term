@@ -6,6 +6,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.5.0-beta.2] — 2026-07-30
+
+Cross-platform release. Prateek-Term, previously macOS-only, now runs natively on **macOS, Windows, and Linux**, with per-OS native integrations and installers for every platform.
+
+### Added
+
+- **Windows & Linux support** — runs natively on Windows 10+ and modern Linux desktops. A single platform-resolver layer centralizes every per-OS decision (shell selection, `PATH`, config-file locations, SSH agent socket, browser/binary discovery), so behavior is correct on each OS.
+- **Native OS integrations, per platform**:
+  - **macOS** — become the system default terminal + a Finder Quick Action.
+  - **Windows** — an **"Open in Prateek-Term"** entry in the File Explorer folder (and folder-background) right-click menu.
+  - **Linux** — a `.desktop` application entry, the `prateekterm://` URL handler, and a Nautilus right-click **"Open in Prateek-Term"** script; the app icon is installed into the user icon theme so it shows in the dash.
+- **Installers for every platform** — Windows **NSIS installer** + **portable `.exe`**, Linux **AppImage** + **`.deb`** (each for x64 and arm64), plus the existing macOS `.dmg` + `.zip` (Apple Silicon).
+- **Duplicate profile** — right-click any saved connection → **Duplicate** to clone it with every detail (host, port, username, password, identity/PEM key, actions, tags, and all options — SSH flags, jump host, port-forwards, Cloudflare, SCP settings) under a suggested unique name, opened for a quick rename.
+- **Cloudflare Access sign-in preflight** — connecting a Cloudflare Access SSH profile now checks for a valid `cloudflared` token first and, if it's missing or expired, offers a **one-click browser login** before connecting (the SSH ProxyCommand runs `cloudflared` non-interactively and can't log in on its own). Connection failures are translated into actionable hints (TLS-inspecting firewall, login required, or origin unreachable).
+
+### Changed
+
+- **Keyboard shortcuts** accept `Ctrl` on Windows/Linux and `⌘` on macOS; window chrome, shortcut glyphs, and UI copy (Finder / File Explorer / file manager) adapt per platform.
+- **CI** builds every OS/arch on its own native runner — including `windows-11-arm` and `ubuntu-24.04-arm` — and publishes all artifacts to the GitHub Release on a `v*` tag.
+- The **user guide** and in-app copy are now cross-platform and version-free.
+
+### Fixed
+
+- **Windows SSH connections** — node-pty's ConPTY backend does not search `PATH`, so a bare `ssh`/`scp`/`sftp` failed with *"File not found"*. Bare command names are now resolved to their full OpenSSH path on Windows (no-op on macOS/Linux).
+- **Serial ports & node-pty native bindings** are unpacked from the app archive so they load correctly in packaged builds on every platform (serial ports were unusable on Windows/Linux before).
+- **Linux dash icon** — the app icon now appears in the dash/taskbar: it's bundled at runtime and the `.desktop` `StartupWMClass` matches the window class. The in-app "register" no longer writes an icon-less entry that shadowed the installed one.
+- **Linux middle-click double-paste** — middle-click pasted the same text twice (the OS X11 primary-selection paste plus the app's clipboard paste). The native paste is now suppressed on Linux so middle-click pastes exactly once.
+- **SSH cwd reporter can no longer hang the terminal** — the OSC 7 working-directory injection now holds user input during its brief echo-off window (flushing it immediately after) and always restores terminal echo, so typing or pasting on connect can't corrupt the line or leave input invisible.
+- **Tab tear-off** — dragging a tab into a new window no longer reopens the entire previous session on top of it; secondary windows (tear-off, New Window, `prateekterm://…target=window`) start with just the intended tab.
+- **MCP "Copy Config JSON"** produced a macOS-only `/Applications/…` path that was broken on Linux and Windows; the snippet's command and server path are now resolved for the current OS.
+- **Copy-paste-safe command echo** — the shown SSH command quotes the `ProxyCommand` value, so pasting it into a shell no longer splits (which made `cloudflared` run bare with *"unable to find config file"*).
+- **Command-lookup hardening** — bare command resolution on Windows never shells out for names containing metacharacters; the MCP-bridge working directory uses `os.homedir()` (was Unix-only `$HOME`).
+
+### Known limitations
+
+- **Windows** has no `sshpass`, so SCP/SFTP **password** auth over the MCP bridge and drag-drop upload is unavailable there — use **key auth** on Windows. Interactive SSH terminal password auth works on every platform.
+
+---
+
 ## [1.4.0] — 2026-06-24
 
 ### Added

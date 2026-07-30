@@ -36,7 +36,7 @@ No plugins. No wrappers. Built in.
 ### SSH / Serial / File Transfer
 - **SSH** with PEM/identity file support, custom SSH options, ssh-config import/export
 - **Jump Host (ProxyJump)** — tunnel through an intermediary SSH host (agent, key, or password auth)
-- **Cloudflare Access** — zero-trust SSH tunnelling via `cloudflared`
+- **Cloudflare Access** — zero-trust SSH tunnelling via `cloudflared`, with a sign-in preflight: if no valid Access token is cached it offers a one-click browser login before connecting
 - **Port forwarding** — local / remote / dynamic (SOCKS5), with one-click **Launch Chrome via this proxy** and per-rule Include/Exclude host filtering
 - **Telnet** with configurable host, port, and options
 - **SFTP** with PEM support and drag-and-drop file upload from Finder
@@ -46,7 +46,8 @@ No plugins. No wrappers. Built in.
 
 ### Connection Manager
 - Save, edit, and organize connection profiles per protocol
-- **Collapsible sidebar** (`⌘B`) — state persists across restarts
+- **Duplicate profile** — right-click any host → **Duplicate** to clone it with every detail (host, port, username, password, key, actions, tags, and all options) under a suggested unique name
+- **Collapsible sidebar** (`⌘B` / `Ctrl+B`) — state persists across restarts
 - **Custom Actions** — define per-profile scripts that execute instantly in the terminal
 - Export / Import profiles and actions as JSON
 - **Per-profile AI toggle** — click the AI chip on any sidebar profile to grant or revoke AI/MCP access; no special tags needed
@@ -113,7 +114,7 @@ Claude: "Connect to my staging server and check disk usage"
 ```bash
 npm install          # install dependencies
 npm start            # run in development mode
-npm test             # run test suite (633 tests)
+npm test             # run test suite (729 tests)
 npm run lint         # lint source
 ```
 
