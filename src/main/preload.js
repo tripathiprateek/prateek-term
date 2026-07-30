@@ -135,6 +135,20 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   cloudflaredFind: (overridePath) =>
     ipcRenderer.invoke('cloudflared:find', overridePath || null),
 
+  // Cloudflare Access — is a valid token cached for this host?
+  // Returns { status: 'valid'|'expired'|'missing', expiresAt }.
+  cloudflaredTokenStatus: (hostname) =>
+    ipcRenderer.invoke('cloudflared:token-status', hostname),
+
+  // Cloudflare Access — run `cloudflared access login` (opens the browser).
+  // Returns { ok, message } once a token is cached or it fails/times out.
+  cloudflaredLogin: (hostname, cloudflaredPath) =>
+    ipcRenderer.invoke('cloudflared:login', { hostname, cloudflaredPath: cloudflaredPath || null }),
+
+  // Cloudflare Access — translate raw failure output into a hint (or null).
+  cloudflaredErrorHint: (text) =>
+    ipcRenderer.invoke('cloudflared:error-hint', text),
+
   // Signal main process that renderer init is complete
   rendererReady: () => ipcRenderer.send('renderer:ready'),
 
@@ -159,6 +173,7 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   // ── MCP bridge ───────────────────────────────────────────────────────────
   mcpStatus:   () => ipcRenderer.invoke('mcp:status'),
   mcpRegister: () => ipcRenderer.invoke('mcp:register'),
+  mcpGetConfig: () => ipcRenderer.invoke('mcp:get-config'),
 
   // ── Renderer error logging ────────────────────────────────────────────────
   logRendererError: (msg) => ipcRenderer.send('debug:rendererError', msg),

@@ -179,3 +179,60 @@ describe('Security hardening', () => {
     expect(mainSource).not.toMatch(/console\.(log|warn|error)\s*\(/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tear-off / secondary windows must NOT restore the whole session
+//   Bug: dragging a tab out opened a new window that restored EVERY tab from
+//   the saved session, then adopted the torn-off tab on top.
+// ---------------------------------------------------------------------------
+describe('Secondary windows skip session restore', () => {
+  test('createNewWindow tags secondary windows with ?secondary=1', () => {
+    const fn = mainSource.match(/function createNewWindow\(opts = \{\}\)[\s\S]{0,1600}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toContain("query: { secondary: '1' }");
+    expect(fn[0]).toContain('opts.secondary');
+  });
+
+  test('the initial window is the ONLY non-secondary createNewWindow caller', () => {
+    // createWindow() opens the main window and must NOT pass secondary.
+    expect(mainSource).toMatch(/mainWindow = createNewWindow\(\);/);
+    // Tear-off / New Window / dock / open-url windows all pass secondary:true.
+    expect(mainSource).toContain('createNewWindow({ secondary: true })');
+    // No bare createNewWindow() call other than the main window + definition.
+    const bareCalls = (mainSource.match(/createNewWindow\(\)/g) || []).length;
+    expect(bareCalls).toBe(1); // only `mainWindow = createNewWindow();`
+  });
+
+  test('renderer restores the session only in the main (non-secondary) window', () => {
+    const initFn = appSource.match(/async function init\(\)[\s\S]{0,1400}/);
+    expect(initFn).not.toBeNull();
+    expect(initFn[0]).toMatch(/secondary[\s\S]{0,120}restoreSession\(\)/);
+    // restoreSession must be guarded, not called unconditionally.
+    expect(initFn[0]).not.toMatch(/\n\s*await restoreSession\(\);/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OSC-7 cwd injection must not corrupt/hang on concurrent user input
+// ---------------------------------------------------------------------------
+describe('OSC cwd injection input-gating', () => {
+  test('user input is held while the injection window is open', () => {
+    expect(appSource).toMatch(/_oscInjecting[\s\S]{0,120}_oscHeldInput/);
+    // term.onData buffers instead of sending while injecting.
+    expect(appSource).toMatch(/if \(tab\._oscInjecting\)\s*\{\s*tab\._oscHeldInput/);
+  });
+
+  test('a safety timer guarantees held input is flushed (never a real hang)', () => {
+    expect(appSource).toContain('_oscSafetyTimer');
+    const fire = appSource.match(/function fireOscInjection\(tab\)[\s\S]{0,1600}/);
+    expect(fire).not.toBeNull();
+    expect(fire[0]).toContain('finishInjection');
+    expect(fire[0]).toMatch(/setTimeout\(finishInjection, 2000\)/);
+  });
+
+  test('phase 2 always restores echo (stty sane fallback) and kills stray input', () => {
+    const fire = appSource.match(/function fireOscInjection\(tab\)[\s\S]{0,3000}/);
+    expect(fire[0]).toContain('stty sane');
+    expect(fire[0]).toContain('\\x15'); // Ctrl-U kill-line prefix
+  });
+});

@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const pty = require('node-pty');
 const fs = require('fs');
 const os = require('os');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 // MCP HTTP bridge — exposes running sessions to AI clients via localhost
 const bridge = require('./http-bridge');
@@ -40,6 +40,8 @@ const {
   buildCloudflareProxyFlags,
   buildJumpHostProxyCommand,
   buildIncludePacUrl,
+  cloudflareTokenStatus,
+  cloudflareErrorHint,
 } = require('./ssh-utils');
 
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
@@ -296,7 +298,7 @@ function handlePrateekTermUrl(url) {
 
       if (target === 'window') {
         // New window: deliver path once its renderer signals ready (webContents.id queued)
-        const win = createNewWindow();
+        const win = createNewWindow({ secondary: true });
         pendingFolderPathsByWc.set(win.webContents.id, folderPath);
         dbgLog(`queued open-folder for new window wc=${win.webContents.id}`);
         return;
@@ -398,7 +400,7 @@ ipcMain.on('renderer:ready', (event) => {
 // Open a new independent window, optionally auto-connecting to a profile
 ipcMain.handle('window:open-new', (event, profile) => {
   dbgLog(`[window] open-new${profile ? ` profile="${profile.name}" protocol=${profile.protocol}` : ' (no profile)'}`);
-  const win = createNewWindow();
+  const win = createNewWindow({ secondary: true });
   if (profile) pendingAutoConnect.set(win.webContents.id, profile);
   return { success: true };
 });
@@ -461,10 +463,23 @@ function getProfilesPath() {
   return settings.profilesPath || path.join(app.getPath('userData'), 'connection-profiles.json');
 }
 
+// Absolute path to the app icon PNG at runtime. Packaged builds read it from
+// resources/ (bundled via extraResources); dev reads it from the source tree.
+// build/ is NOT inside the asar, so the source path only works in dev.
+function appIconPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.png')
+    : path.join(__dirname, '..', '..', 'build', 'icon.png');
+}
+
 // Creates a new independent app window (shared by initial launch, Cmd+N, dock menu, tear-off)
-function createNewWindow() {
+// opts.secondary: this is NOT the initial window (tear-off, Cmd+N, dock/menu
+// New Window, prateekterm://…target=window). Secondary windows must NOT restore
+// the saved session — otherwise a torn-off tab reopens the entire previous
+// session on top of itself. Signalled to the renderer via ?secondary=1.
+function createNewWindow(opts = {}) {
   const { nativeImage } = require('electron');
-  const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
+  const iconPath = appIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -487,7 +502,10 @@ function createNewWindow() {
       nodeIntegration: false,
     },
   });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  win.loadFile(
+    path.join(__dirname, '..', 'renderer', 'index.html'),
+    opts.secondary ? { query: { secondary: '1' } } : undefined,
+  );
   // Force native title bar to show version after page load overrides it
   const versionTitle = `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`;
   win.webContents.on('did-finish-load', () => win.setTitle(versionTitle));
@@ -511,7 +529,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   // Set dock icon in dev mode (macOS ignores BrowserWindow icon)
-  const iconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
+  const iconPath = appIconPath();
   try {
     const { nativeImage } = require('electron');
     const dockIcon = nativeImage.createFromPath(iconPath);
@@ -578,7 +596,7 @@ app.whenReady().then(() => {
     {
       label: 'Window',
       submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow({ secondary: true }) },
         { type: 'separator' },
         { role: 'minimize' },
         { role: 'zoom' },
@@ -610,7 +628,7 @@ app.whenReady().then(() => {
   // Dock right-click menu (macOS)
   if (app.dock) {
     app.dock.setMenu(Menu.buildFromTemplate([
-      { label: 'New Window', click: () => createNewWindow() },
+      { label: 'New Window', click: () => createNewWindow({ secondary: true }) },
     ]));
   }
 
@@ -796,7 +814,17 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     }
   });
 
-  const debugCmd = [shell, ...args].join(' ');
+  // Build a copy-pasteable echo: single-quote any token with spaces/metachars
+  // (e.g. the cloudflared / jump-host `ProxyCommand=… … …` value) so pasting
+  // the line into a shell doesn't split it — an unquoted ProxyCommand makes
+  // cloudflared run bare and fail with "unable to find config file".
+  const quoteForDisplay = (tok) => {
+    const s = String(tok);
+    if (s !== '' && /^[A-Za-z0-9_./:=@%+-]+$/.test(s)) return s;
+    const q = String.fromCharCode(39);
+    return q + s.split(q).join(q + '\\' + q + q) + q;
+  };
+  const debugCmd = [shell, ...args].map(quoteForDisplay).join(' ');
   return { id, debugCmd };
 });
 
@@ -956,6 +984,33 @@ function findExec(name, fallbacks = []) {
   return Promise.resolve(platform.whichBin(name, fallbacks));
 }
 
+// Where the MCP server.js lives, per OS/build. Packaged builds run it from a
+// copy under ~/.prateek-term/mcp/ (asar can't be executed by external Node);
+// dev runs it straight from the source tree. Side-effect-free — the copy is
+// performed by mcp:register.
+function mcpServerPath() {
+  if (app.isPackaged) {
+    return path.join(os.homedir(), '.prateek-term', 'mcp', 'server.js');
+  }
+  return path.join(app.getAppPath(), 'src', 'mcp', 'server.js');
+}
+
+// Resolve the node binary to launch the MCP server with, per OS.
+function mcpNodePath() {
+  const candidates = platform.isWindows()
+    ? [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe')]
+    : ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
+  return findExec(platform.isWindows() ? 'node.exe' : 'node', candidates);
+}
+
+// Returns the exact {command,args} an AI client needs to launch the MCP server,
+// with paths resolved for the current OS. Used by the "Copy Config JSON"
+// snippet so it never hardcodes a macOS .app path.
+ipcMain.handle('mcp:get-config', async () => {
+  const nodePath = await mcpNodePath();
+  return { command: nodePath || 'node', args: [mcpServerPath()] };
+});
+
 ipcMain.handle('mcp:register', async () => {
   // When packaged, node_modules are inside the asar and can't be loaded by external Node.
   // Solution: copy server.js to ~/.prateek-term/mcp/ and install its deps there.
@@ -996,16 +1051,13 @@ ipcMain.handle('mcp:register', async () => {
   }
   const results = {};
 
-  const nodeCandidates = platform.isWindows()
-    ? [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe')]
-    : ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
   const claudeCandidates = platform.isWindows()
     ? [path.join(process.env.APPDATA || '', 'npm', 'claude.cmd')]
     : ['/opt/homebrew/bin/claude', '/usr/local/bin/claude',
        path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
        path.join(os.homedir(), '.local', 'bin', 'claude')];
   const [nodePath, claudePath] = await Promise.all([
-    findExec(platform.isWindows() ? 'node.exe' : 'node', nodeCandidates),
+    mcpNodePath(),
     findExec(platform.isWindows() ? 'claude.cmd' : 'claude', claudeCandidates),
   ]);
 
@@ -1294,6 +1346,50 @@ ipcMain.handle('cloudflared:find', (_event, overridePath) => {
   return findCloudflared(overridePath || null);
 });
 
+// Is there a usable Cloudflare Access token cached for this host? The SSH
+// ProxyCommand runs cloudflared non-interactively and can't log in itself, so
+// the renderer checks this before connecting and offers a login if needed.
+ipcMain.handle('cloudflared:token-status', (_event, hostname) => {
+  return cloudflareTokenStatus(hostname);
+});
+
+// Translate raw SSH/cloudflared failure output into an actionable hint, or null.
+ipcMain.handle('cloudflared:error-hint', (_event, text) => {
+  return cloudflareErrorHint(text);
+});
+
+// Run `cloudflared access login <url>` — opens the browser for SSO and caches a
+// token. Resolves once the token file appears (or on error/timeout). The user
+// completes the auth in their browser; we never handle their credentials.
+ipcMain.handle('cloudflared:login', async (_event, { hostname, cloudflaredPath } = {}) => {
+  if (!hostname) return { ok: false, message: 'No hostname provided' };
+  const bin = cloudflaredPath || (findCloudflared(null) || {}).path || 'cloudflared';
+  const url = `https://${hostname}`;
+  dbgLog(`[cloudflared] access login ${url} via ${bin}`);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r) => { if (!done) { done = true; try { child.kill(); } catch { /* already gone */ } resolve(r); } };
+    const child = spawn(bin, ['access', 'login', url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    const onData = (d) => {
+      out += d.toString();
+      if (/Successfully fetched your token/i.test(out)) finish({ ok: true, message: 'Logged in to Cloudflare Access.' });
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('error', (e) => finish({ ok: false, message: e.message }));
+    child.on('exit', (code) => {
+      if (cloudflareTokenStatus(hostname).status === 'valid') finish({ ok: true, message: 'Logged in to Cloudflare Access.' });
+      else finish({ ok: false, message: cloudflareErrorHint(out) || `cloudflared login exited (code ${code}).` });
+    });
+    // Cap the wait so a never-completed browser login doesn't hang forever.
+    setTimeout(() => {
+      const st = cloudflareTokenStatus(hostname).status;
+      finish(st === 'valid' ? { ok: true, message: 'Logged in to Cloudflare Access.' } : { ok: false, message: 'Login timed out — complete the browser sign-in and try again.' });
+    }, 120000);
+  });
+});
+
 ipcMain.handle('help:open', () => {
   if (helpWindow && !helpWindow.isDestroyed()) {
     helpWindow.focus();
@@ -1374,7 +1470,11 @@ ipcMain.handle('defaultTerminal:set', () => {
   try {
     const integ = getIntegration();
     if (!integ) return { ok: false, error: 'Unsupported platform' };
-    integ.register(app.getPath('exe'));
+    // For AppImage, app.getPath('exe') is the ephemeral mount binary — the
+    // .desktop must point at the real .AppImage file (in $APPIMAGE) so it can
+    // be relaunched. Pass the icon so Linux can install it into the user theme.
+    const exePath = process.env.APPIMAGE || app.getPath('exe');
+    integ.register(exePath, appIconPath());
     dbgLog('[default-terminal] integration registered');
     return { ok: true };
   } catch (e) {

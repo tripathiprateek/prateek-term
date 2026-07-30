@@ -33,7 +33,7 @@ beforeAll(() => {
 describe('init() — outer try-catch', () => {
   test('init() has an outer try-catch block', () => {
     // async function init() { try { ... } catch (err) { ... }
-    const initBlock = source.match(/async function init\s*\(\)\s*\{[\s\S]{0,2000}/);
+    const initBlock = source.match(/async function init\s*\(\)\s*\{[\s\S]{0,2600}/);
     expect(initBlock).not.toBeNull();
     expect(initBlock[0]).toMatch(/catch\s*\(err\)/);
   });

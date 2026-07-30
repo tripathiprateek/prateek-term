@@ -752,7 +752,36 @@ function createTerminalInstance() {
   return { term, fitAddon, searchAddon };
 }
 
+// Cloudflare Access preflight: the SSH ProxyCommand runs cloudflared
+// non-interactively and cannot log in, so a valid token must already be cached
+// — otherwise the session dies at key exchange with an opaque error. If the
+// token is missing/expired, offer to open the browser login first. Returns true
+// when it's OK to proceed with the connection.
+async function ensureCloudflareToken(profile) {
+  const host = profile && profile.host;
+  if (!host) return true;
+  let st;
+  try { st = await window.terminalAPI.cloudflaredTokenStatus(host); } catch { return true; }
+  if (!st || st.status === 'valid') return true;
+  const verb = st.status === 'expired' ? 'has expired' : 'is required';
+  if (!confirm(`Cloudflare Access sign-in ${verb} for ${host}.\n\nOpen your browser to log in now?`)) return false;
+  let res;
+  try { res = await window.terminalAPI.cloudflaredLogin(host, profile.cloudflaredPath || null); }
+  catch (e) { res = { ok: false, message: e.message }; }
+  if (!res || !res.ok) {
+    alert(`Cloudflare Access login failed:\n${(res && res.message) || 'unknown error'}`);
+    return false;
+  }
+  return true;
+}
+
 async function createTab(options = {}) {
+  // Preflight Cloudflare Access before building any tab UI.
+  const _cfp = options.connectionProfile;
+  if (_cfp && _cfp.protocol === 'ssh' && _cfp.cloudflareAccess && _cfp.host) {
+    if (!(await ensureCloudflareToken(_cfp))) return null;
+  }
+
   const tabId = ++tabIdCounter;
   const protocol = options.protocol || 'local';
   const isSerial = protocol === 'serial';
@@ -986,6 +1015,9 @@ async function createTab(options = {}) {
       tab._pendingPassword = cp.password;
       tab._pwdBuf = '';
     }
+    // Cloudflare Access tab: capture a rolling output tail so a failed connect
+    // can be translated into an actionable hint on exit.
+    if (cp && cp.protocol === 'ssh' && cp.cloudflareAccess) tab._cfHost = cp.host;
 
     // Show the exact command being run so SSH errors are self-explanatory
     if (shellCommand && result.debugCmd) {
@@ -994,7 +1026,15 @@ async function createTab(options = {}) {
 
     // Use tab.ptyId (not a local const) so reconnect can update it transparently
     term.onData((data) => {
-      if (tab.ptyId) window.terminalAPI.sendInput(tab.ptyId, data);
+      if (!tab.ptyId) return;
+      // While the OSC 7 cwd-reporter is being injected the shell has echo OFF
+      // for a brief window. If the user types/pastes into that window the bytes
+      // interleave with the injected setup line and can corrupt it (worst case
+      // leaving echo off → terminal looks hung). Hold input until injection
+      // completes, then flush it. A safety timer guarantees the flush so held
+      // input can never be lost or block the terminal permanently.
+      if (tab._oscInjecting) { tab._oscHeldInput = (tab._oscHeldInput || '') + data; return; }
+      window.terminalAPI.sendInput(tab.ptyId, data);
     });
 
     // For SSH tabs: auto-inject a shell-agnostic cwd reporter.
@@ -1124,6 +1164,18 @@ async function createTab(options = {}) {
     e.stopPropagation();
     showTerminalContextMenu(e.clientX, e.clientY, term, tab);
   });
+
+  // Linux: Chromium natively pastes the X11 PRIMARY selection into xterm's
+  // textarea on middle-click. Combined with our clipboard paste below that
+  // yields a DOUBLE paste. Cancel the middle-button mousedown (its default
+  // action is the native paste) so only our handler runs. Capture phase +
+  // preventDefault only — never stopPropagation, so xterm still sees the event
+  // for mouse-reporting apps (vim/tmux).
+  if (window.terminalAPI && window.terminalAPI.platform === 'linux') {
+    pane.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    }, true);
+  }
 
   // Middle-click: paste clipboard (PuTTY / Linux terminal style)
   pane.addEventListener('auxclick', (e) => {
@@ -1899,6 +1951,12 @@ function injectOscCwdReporter(tab) {
   // prompt is detected. See fireOscInjection() below.
   tab._oscWatchBuf = '';
   tab._oscDebounceTimer = null;
+  // Reset input-gate state (matters on reconnect re-arm): never leave input
+  // held or the gate stuck on from a prior session.
+  tab._oscInjecting = false;
+  tab._oscHeldInput = '';
+  clearTimeout(tab._oscSafetyTimer);
+  tab._oscSafetyTimer = null;
 }
 
 // Called from onTerminalData when a shell prompt is detected and idle.
@@ -1908,6 +1966,24 @@ function fireOscInjection(tab) {
   tab._oscWatchBuf = '';
   clearTimeout(tab._oscDebounceTimer);
   tab._oscDebounceTimer = null;
+
+  // Gate user input for the duration of the injection so keystrokes/pastes
+  // can't interleave with the echo-off setup line. term.onData buffers into
+  // _oscHeldInput while _oscInjecting is true; finishInjection() flushes it.
+  tab._oscInjecting = true;
+  tab._oscHeldInput = '';
+  const finishInjection = () => {
+    if (!tab._oscInjecting) return;         // idempotent
+    tab._oscInjecting = false;
+    clearTimeout(tab._oscSafetyTimer);
+    tab._oscSafetyTimer = null;
+    const held = tab._oscHeldInput || '';
+    tab._oscHeldInput = '';
+    if (held && tab.ptyId) window.terminalAPI.sendInput(tab.ptyId, held);
+  };
+  // Hard safety: NEVER hold input longer than 2s (a permanently-held buffer
+  // would itself be a hang). This fires even if phase 2 is skipped.
+  tab._oscSafetyTimer = setTimeout(finishInjection, 2000);
 
   // Phase 1: save full terminal state then disable echo (leading space → history skip).
   // Using `stty -g` captures ALL terminal flags (including readline/ICANON settings
@@ -1920,9 +1996,12 @@ function fireOscInjection(tab) {
   // (variable expansion). Single-quotes inside are escaped as \' for JS.
   // \\033 and \\\\ are JS escape sequences that produce the shell literals \033 and \\.
   setTimeout(() => {
-    if (!tab.ptyId) return;
+    if (!tab.ptyId) { finishInjection(); return; }
     const setup =
-      ' _pt_cwd(){ printf \'\\033]7;file://%s%s\\033\\\\\' ' +
+      // Leading Ctrl-U (\x15) kills any stray bytes on the line before the
+      // setup runs — belt-and-suspenders in case anything slipped in ahead of
+      // the input gate — so the command below always parses cleanly.
+      '\x15 _pt_cwd(){ printf \'\\033]7;file://%s%s\\033\\\\\' ' +
       '"${HOSTNAME:-$(hostname 2>/dev/null)}" "$PWD"; };' +
       'cd(){ command cd "$@" && _pt_cwd; };' +
       '_pt_cwd;' +
@@ -1931,13 +2010,16 @@ function fireOscInjection(tab) {
       // ${_PT_STTY:-echo}: if stty -g succeeded, pass the saved state blob;
       // if stty -g wasn't available (busybox ash), _PT_STTY is empty so this
       // falls back to the single word "echo" — i.e. `stty echo` — which at
-      // minimum re-enables the ECHO flag. Either way it's one real command.
-      'stty "${_PT_STTY:-echo}" 2>/dev/null;' +
+      // minimum re-enables the ECHO flag. `|| stty sane` is a last-resort so
+      // echo is ALWAYS restored even if the saved blob is rejected.
+      'stty "${_PT_STTY:-echo}" 2>/dev/null || stty sane 2>/dev/null;' +
       'unset _PT_STTY;' +
       // Erase the visible phase-1 line and redraw prompt on that row
       'printf \'\\033[2F\\033[0J\'' +
       '\r';
     window.terminalAPI.sendInput(tab.ptyId, setup);
+    // Release the input gate shortly after phase 2 lands, then flush held input.
+    setTimeout(finishInjection, 150);
   }, 300);
 }
 
@@ -2596,6 +2678,15 @@ function showExitMessage(tab, exitCode) {
   const codeStr = exitCode != null && exitCode !== 0 ? ` (code ${exitCode})` : '';
   const canReconnect = !!(tab.connectionProfile && tab.protocol !== 'local');
 
+  // Cloudflare Access tab that failed → translate the raw output into an
+  // actionable hint (MITM firewall / login-required / origin down).
+  if (tab._cfHost && exitCode !== 0 && tab._cfTail) {
+    const tail = tab._cfTail;
+    Promise.resolve(window.terminalAPI.cloudflaredErrorHint(tail))
+      .then((hint) => { if (hint) tab.term.write(`\r\n\x1b[33m⚠ ${hint}\x1b[0m\r\n`); })
+      .catch(() => {});
+  }
+
   if (canReconnect) {
     tab.term.write(
       `\r\n\x1b[90m[Process exited${codeStr}. Press R to reconnect or any key to close]\x1b[0m\r\n`
@@ -2658,6 +2749,9 @@ function setupTerminalListeners() {
       maybeFireOscInjection(tab, data);
 
       tab.term.write(data);
+      // Rolling tail for Cloudflare Access tabs → used to translate a failed
+      // connect into an actionable hint when the process exits.
+      if (tab._cfHost) tab._cfTail = ((tab._cfTail || '') + data).slice(-4000);
       if (tab.logId) window.terminalAPI.logWrite(tab.logId, data);
     } else {
       // Process started before the tab was registered — buffer until flush
@@ -3133,6 +3227,40 @@ async function quickConnect(profile) {
 
 // ===== Context Menu =====
 
+// Suggest a unique "(copy)" name for a cloned profile, avoiding collisions
+// with existingNames. Pure — no DOM/state access.
+function suggestCloneName(baseName, existingNames) {
+  const taken = new Set((existingNames || []).map((n) => (n || '').trim()));
+  const base = (baseName || 'Profile').trim();
+  let candidate = `${base} (copy)`;
+  let n = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base} (copy ${n})`;
+    n += 1;
+  }
+  return candidate;
+}
+
+// Duplicate a profile with ALL details — host, port, username, password, key
+// (file or pasted text), actions, tags, and every option (SSH flags, jump host,
+// port-forwards, Cloudflare, SCP settings) — under a suggested unique name, then
+// open it in the Connection Manager for review/rename.
+function cloneProfile(profile) {
+  if (!profile) return;
+  const src = state.profiles.find((p) => p.id === profile.id) || profile;
+  // JSON deep-copy: nested arrays (actions, portForwards, tags) become
+  // independent, and it matches exactly how profiles are persisted.
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  copy.name = suggestCloneName(src.name || src.host, state.profiles.map((p) => p.name));
+  state.profiles.push(copy);
+  saveAllProfiles();
+  renderProfilesList();
+  // Open the clone so the suggested name is visible and pre-selected for editing.
+  openConnectionManager(copy);
+  if (dom.connName) { dom.connName.focus(); dom.connName.select(); }
+}
+
 function showHostContextMenu(e, profile) {
   // Remove any existing context menu
   dismissContextMenu();
@@ -3169,6 +3297,20 @@ function showHostContextMenu(e, profile) {
     openConnectionManager(profile);
   });
 
+  const cloneItem = document.createElement('div');
+  cloneItem.className = 'context-menu-item';
+  cloneItem.innerHTML = `
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </svg>
+    Duplicate
+  `;
+  cloneItem.addEventListener('click', () => {
+    dismissContextMenu();
+    cloneProfile(profile);
+  });
+
   const deleteItem = document.createElement('div');
   deleteItem.className = 'context-menu-item danger';
   deleteItem.innerHTML = `
@@ -3189,6 +3331,7 @@ function showHostContextMenu(e, profile) {
 
   menu.appendChild(connectItem);
   menu.appendChild(editItem);
+  menu.appendChild(cloneItem);
   menu.appendChild(deleteItem);
   document.body.appendChild(menu);
 
@@ -5029,13 +5172,12 @@ async function updateMcpStatusBadge(enabled) {
 }
 
 async function copyMcpConfig() {
-  const appPath = '/Applications/Prateek-Term.app/Contents/Resources/app/src/mcp/server.js';
+  // Resolve command + server path from the main process so the snippet is
+  // correct on every OS (never hardcode a macOS .app path).
+  const entry = await window.terminalAPI.mcpGetConfig();
   const config = {
     mcpServers: {
-      'prateek-term': {
-        command: 'node',
-        args: [appPath],
-      },
+      'prateek-term': entry,
     },
   };
   const snippet = JSON.stringify(config, null, 2);
@@ -5043,7 +5185,7 @@ async function copyMcpConfig() {
     await navigator.clipboard.writeText(snippet);
     setSettingsStatus('MCP config copied to clipboard — paste into your AI client config.');
   } catch {
-    setSettingsStatus('Could not copy — config: ' + JSON.stringify({ command: 'node', args: [appPath] }), true);
+    setSettingsStatus('Could not copy — config: ' + JSON.stringify(entry), true);
   }
 }
 
@@ -5290,7 +5432,12 @@ async function init() {
     // Restore persisted sidebar collapsed state
     if (savedSettings.sidebarCollapsed) applySidebarCollapsed(true);
     await loadProfiles();
-    await restoreSession();
+    // Only the initial (main) window restores the saved session. Secondary
+    // windows (tab tear-off, New Window, prateekterm://…target=window) are
+    // tagged ?secondary=1 by the main process and must start empty — otherwise
+    // a torn-off tab reopens the entire previous session on top of itself.
+    const isSecondaryWindow = new URLSearchParams(window.location.search).get('secondary') === '1';
+    if (!isSecondaryWindow) await restoreSession();
     window.terminalAPI.onOpenSettings(openSettings);
     window.terminalAPI.onOpenFolder(openLocalFolderTab);
     window.terminalAPI.onAutoConnect((profile) => quickConnect(profile));

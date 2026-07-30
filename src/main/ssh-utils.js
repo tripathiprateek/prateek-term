@@ -578,8 +578,78 @@ function buildIncludePacUrl(socksPort, listStr) {
   return `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Cloudflare Access — token preflight & error translation
+// ---------------------------------------------------------------------------
+
+// Decode a JWT's `exp` claim (epoch seconds), or null if unparseable.
+function decodeJwtExp(jwt) {
+  const parts = String(jwt).split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Inspect the cached Cloudflare Access token for an SSH hostname. cloudflared
+ * stores it at ~/.cloudflared/<hostname>-<hash>-token (a JWT). The connection's
+ * ProxyCommand runs cloudflared non-interactively, so it can't log in on its
+ * own — a valid token must already exist, or the SSH session dies at key
+ * exchange. This lets the app check first and offer a login.
+ *
+ * @param {string} hostname
+ * @param {string} [dir] token directory (defaults to ~/.cloudflared) — injectable for tests
+ * @param {number} [nowSec] current epoch seconds (injectable for tests)
+ * @returns {{status:'valid'|'expired'|'missing', expiresAt:(number|null)}}
+ */
+function cloudflareTokenStatus(hostname, dir, nowSec) {
+  if (!hostname) return { status: 'missing', expiresAt: null };
+  const base = dir || path.join(os.homedir(), '.cloudflared');
+  let files;
+  try { files = fs.readdirSync(base); } catch { return { status: 'missing', expiresAt: null }; }
+
+  const prefix = `${hostname}-`;
+  const match = files.find((f) => f.startsWith(prefix) && f.endsWith('-token'));
+  if (!match) return { status: 'missing', expiresAt: null };
+
+  let raw = '';
+  try { raw = fs.readFileSync(path.join(base, match), 'utf8').trim(); } catch { /* unreadable */ }
+  if (!raw) return { status: 'missing', expiresAt: null };
+
+  const exp = decodeJwtExp(raw);
+  if (exp == null) return { status: 'valid', expiresAt: null }; // present but opaque — let cloudflared decide
+  const now = typeof nowSec === 'number' ? nowSec : Math.floor(Date.now() / 1000);
+  return { status: exp > now ? 'valid' : 'expired', expiresAt: exp };
+}
+
+/**
+ * Translate raw SSH/cloudflared failure output into an actionable hint for a
+ * Cloudflare Access connection, or null if nothing is recognised. Order matters:
+ * most-specific signatures first.
+ */
+function cloudflareErrorHint(text) {
+  const s = String(text || '');
+  if (/certificate signed by unknown authority|failed to verify certificate|\bx509:/i.test(s)) {
+    return 'A TLS-inspecting firewall (e.g. FortiGate) is intercepting this host. Exempt the domain from SSL deep-inspection, or connect from a network/VPN without interception.';
+  }
+  if (/unable to find config file/i.test(s)) {
+    return 'cloudflared ran without its subcommand — update Prateek-Term (the ProxyCommand quoting was fixed).';
+  }
+  if (/kex_exchange_identification|Connection closed by/i.test(s)) {
+    return 'Cloudflare Access login required, or the tunnel origin is unreachable. Log in to Cloudflare Access and reconnect; if it still closes, the device tunnel/SSH service may be down.';
+  }
+  return null;
+}
+
 module.exports = {
   writeAskpassScript,
+  cloudflareTokenStatus,
+  cloudflareErrorHint,
+  decodeJwtExp,
   wrapWithAskpass,
   findSshpass,
   isSshpassAvailable,

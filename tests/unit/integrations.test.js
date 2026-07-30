@@ -39,9 +39,40 @@ describe('linux-integrations', () => {
     expect(linux.isRegistered()).toBe(true);
     const body = fs.readFileSync(linux.desktopPath(), 'utf8');
     expect(body).toContain('[Desktop Entry]');
-    expect(body).toContain('Exec="/opt/Prateek-Term/prateek-term" %u');
+    expect(body).toContain("Exec='/opt/Prateek-Term/prateek-term' %u");
     expect(body).toContain('x-scheme-handler/prateekterm');
     expect(body).toContain('Categories=Utility;TerminalEmulator;System;');
+  });
+
+  test('.desktop carries Icon= and the correct (lowercase) StartupWMClass', () => {
+    // Regression: a user-level entry shadows the deb's; without Icon= and a
+    // matching StartupWMClass the dash icon vanishes after "Register".
+    linux.register('/opt/Prateek-Term/prateek-term');
+    const body = fs.readFileSync(linux.desktopPath(), 'utf8');
+    expect(body).toContain('Icon=prateek-term');
+    expect(body).toContain('StartupWMClass=prateek-term');
+    expect(body).not.toContain('StartupWMClass=Prateek-Term');
+  });
+
+  test('register installs the icon into the user hicolor theme when given one', () => {
+    const iconSrc = path.join(tmp, 'src-icon.png');
+    fs.writeFileSync(iconSrc, 'PNGDATA');
+    linux.register('/opt/Prateek-Term/prateek-term', iconSrc);
+    expect(fs.existsSync(linux.iconInstalledPath())).toBe(true);
+    expect(linux.iconInstalledPath()).toBe(
+      path.join(tmp, 'icons', 'hicolor', '512x512', 'apps', 'prateek-term.png'));
+  });
+
+  test('register installs an executable Nautilus "Open in Prateek-Term" script', () => {
+    linux.register('/opt/Prateek-Term/prateek-term');
+    const sp = linux.nautilusScriptPath();
+    expect(sp).toBe(path.join(tmp, 'nautilus', 'scripts', 'Open in Prateek-Term'));
+    expect(fs.existsSync(sp)).toBe(true);
+    const st = fs.statSync(sp);
+    expect(st.mode & 0o111).toBeTruthy(); // executable bit set
+    const body = fs.readFileSync(sp, 'utf8');
+    expect(body).toContain("exe='/opt/Prateek-Term/prateek-term'");
+    expect(body).toContain('NAUTILUS_SCRIPT_SELECTED_FILE_PATHS');
   });
 
   test('register throws without an exe path', () => {

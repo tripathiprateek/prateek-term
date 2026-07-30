@@ -76,6 +76,29 @@ describe('Middle-click paste uses term.paste() (BUG-004)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Linux double-paste — suppress Chromium's native middle-click PRIMARY paste
+// ---------------------------------------------------------------------------
+
+describe('Linux middle-click double-paste guard', () => {
+  test('cancels the middle-button mousedown on Linux only', () => {
+    // A capture-phase mousedown handler must preventDefault the middle button
+    // (button === 1) for the Linux platform, so the native X11 primary paste
+    // does not fire alongside our clipboard paste.
+    const guard = source.match(/platform === 'linux'[\s\S]{0,320}/);
+    expect(guard).not.toBeNull();
+    expect(guard[0]).toContain("addEventListener('mousedown'");
+    expect(guard[0]).toContain('e.button === 1');
+    expect(guard[0]).toContain('preventDefault');
+    expect(guard[0]).toContain('true'); // capture phase
+  });
+
+  test('does not stopPropagation (xterm still sees the event for mouse reporting)', () => {
+    const guard = source.match(/platform === 'linux'[\s\S]{0,320}/);
+    expect(guard[0]).not.toContain('stopPropagation');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // BUG-004 — Context-menu paste must use term.paste()
 // ---------------------------------------------------------------------------
 
