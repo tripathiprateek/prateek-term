@@ -2,9 +2,7 @@ name: CI / Release
 
 on:
   push:
-    # feature/cross-platform-win-linux: temporary, to shake down the 5-job
-    # matrix before tagging a release — remove after merge.
-    branches: [main, feature/cross-platform-win-linux]
+    branches: [main]
     tags: ['v*.*.*']
   pull_request:
     branches: [main]
