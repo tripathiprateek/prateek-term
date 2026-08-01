@@ -130,6 +130,9 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   debugRotateLog: () => ipcRenderer.invoke('debug:rotateLog'),
   debugListArchives: () => ipcRenderer.invoke('debug:listArchives'),
 
+  // Startup dependency check — returns [{ key, found, path, required, purpose, install }].
+  checkDependencies: () => ipcRenderer.invoke('deps:check'),
+
   // Cloudflare Access — find the cloudflared binary.
   // Pass an optional user-supplied path; returns { path, version } or null.
   cloudflaredFind: (overridePath) =>

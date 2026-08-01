@@ -46,6 +46,11 @@ const {
 
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
 const platform = require('./platform');
+const { checkDependencies } = require('./dependencies');
+
+// Report which external CLI tools the app depends on are present/missing, so the
+// renderer can highlight anything to install (e.g. sshpass for password jumps).
+ipcMain.handle('deps:check', () => checkDependencies());
 
 function getBuildNumber() {
   try {

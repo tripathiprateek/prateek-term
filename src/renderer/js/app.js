@@ -697,6 +697,11 @@ const dom = {
   updateBannerChannel: document.getElementById('update-banner-channel'),
   updateDownloadBtn:   document.getElementById('update-download-btn'),
   updateDismissBtn:    document.getElementById('update-dismiss-btn'),
+  depsBanner:          document.getElementById('deps-banner'),
+  depsBannerText:      document.getElementById('deps-banner-text'),
+  depsDetails:         document.getElementById('deps-details'),
+  depsDetailsBtn:      document.getElementById('deps-details-btn'),
+  depsDismissBtn:      document.getElementById('deps-dismiss-btn'),
 };
 
 // ===== Terminal Management =====
@@ -4408,6 +4413,41 @@ function setupUpdateBanner() {
   });
 }
 
+// Startup self-check: probe the external CLI tools the app shells out to and
+// highlight any that are missing (e.g. sshpass for password jump-hosts) with a
+// dismissible banner + expandable install instructions. Best-effort — a failed
+// check never blocks startup.
+async function setupDependencyBanner() {
+  if (!dom.depsBanner) return;
+  let deps;
+  try { deps = await window.terminalAPI.checkDependencies(); } catch { return; }
+  const missing = (deps || []).filter((d) => !d.found);
+  if (!missing.length) return;
+
+  const required = missing.filter((d) => d.required);
+  dom.depsBanner.classList.toggle('critical', required.length > 0);
+  dom.depsBannerText.textContent = required.length
+    ? `Missing required tool: ${required.map((d) => d.key).join(', ')} — SSH connections won't work until it's installed`
+    : `Optional tools not found: ${missing.map((d) => d.key).join(', ')} — some features need these`;
+
+  dom.depsDetails.innerHTML = missing.map((d) => `
+    <div class="dep-row">
+      <span class="dep-name${d.required ? ' req' : ''}">${escapeHtml(d.key)}</span>
+      <span class="dep-purpose">${escapeHtml(d.purpose)}</span>
+      <code class="dep-install">${escapeHtml(d.install)}</code>
+    </div>`).join('');
+
+  dom.depsDetailsBtn.addEventListener('click', () => {
+    dom.depsDetails.classList.toggle('hidden');
+  });
+  dom.depsDismissBtn.addEventListener('click', () => {
+    dom.depsBanner.classList.add('hidden');
+    dom.depsDetails.classList.add('hidden');
+  });
+
+  dom.depsBanner.classList.remove('hidden');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 function setupEventListeners() {
@@ -5445,6 +5485,7 @@ async function init() {
     window.terminalAPI.onProfilesChanged(() => loadProfiles());
     window.terminalAPI.rendererReady();   // flush any buffered open-folder URLs
     setupUpdateBanner();
+    setupDependencyBanner();   // probe external CLI deps, highlight any missing
     // Set window title with version and build number
     try {
       const vInfo = await window.terminalAPI.getVersionInfo();
