@@ -47,10 +47,15 @@ const {
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
 const platform = require('./platform');
 const { checkDependencies } = require('./dependencies');
+const { runHealthChecks } = require('./health-checks');
 
-// Report which external CLI tools the app depends on are present/missing, so the
-// renderer can highlight anything to install (e.g. sshpass for password jumps).
-ipcMain.handle('deps:check', () => checkDependencies());
+// Startup self-check: which external CLI tools are present and new enough, plus
+// environment problems that silently break SSH (wedged ssh-agent, ~/.ssh
+// permissions). The renderer highlights anything actionable.
+ipcMain.handle('deps:check', async () => ({
+  dependencies: checkDependencies(),
+  issues: await runHealthChecks(),
+}));
 
 function getBuildNumber() {
   try {

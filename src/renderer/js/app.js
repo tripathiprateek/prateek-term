@@ -4419,22 +4419,43 @@ function setupUpdateBanner() {
 // check never blocks startup.
 async function setupDependencyBanner() {
   if (!dom.depsBanner) return;
-  let deps;
-  try { deps = await window.terminalAPI.checkDependencies(); } catch { return; }
-  const missing = (deps || []).filter((d) => !d.found);
-  if (!missing.length) return;
+  let res;
+  try { res = await window.terminalAPI.checkDependencies(); } catch { return; }
+  // Back-compat: older main processes returned a bare array of dependencies.
+  const deps   = Array.isArray(res) ? res : (res && res.dependencies) || [];
+  const issues = (res && res.issues) || [];
 
-  const required = missing.filter((d) => d.required);
-  dom.depsBanner.classList.toggle('critical', required.length > 0);
-  dom.depsBannerText.textContent = required.length
-    ? `Missing required tool: ${required.map((d) => d.key).join(', ')} — SSH connections won't work until it's installed`
-    : `Optional tools not found: ${missing.map((d) => d.key).join(', ')} — some features need these`;
+  const missing  = deps.filter((d) => !d.found);
+  const outdated = deps.filter((d) => d.found && d.versionState === 'outdated');
+  // Normalise everything into one list of {name, why, fix, critical} rows.
+  const rows = [
+    ...missing.map((d) => ({
+      name: d.key, critical: !!d.required, fix: d.install,
+      why: `Not installed — ${d.purpose}`,
+    })),
+    ...outdated.map((d) => ({
+      name: d.key, critical: false, fix: d.install,
+      why: `Version ${d.version} is too old (needs ${d.minVersion}+) — ${d.purpose}. `
+         + 'Outdated versions can fail or hang instead of erroring clearly.',
+    })),
+    ...issues.map((i) => ({
+      name: i.id.split(':')[0], critical: i.severity === 'error', fix: i.fix, why: i.detail,
+    })),
+  ];
+  if (!rows.length) return;
 
-  dom.depsDetails.innerHTML = missing.map((d) => `
+  const criticalCount = rows.filter((r) => r.critical).length;
+  dom.depsBanner.classList.toggle('critical', criticalCount > 0);
+  const names = [...new Set(rows.map((r) => r.name))].join(', ');
+  dom.depsBannerText.textContent = criticalCount
+    ? `Environment problem: ${names} — connections may fail until this is fixed`
+    : `Check your setup: ${names} — some features may not work`;
+
+  dom.depsDetails.innerHTML = rows.map((r) => `
     <div class="dep-row">
-      <span class="dep-name${d.required ? ' req' : ''}">${escapeHtml(d.key)}</span>
-      <span class="dep-purpose">${escapeHtml(d.purpose)}</span>
-      <code class="dep-install">${escapeHtml(d.install)}</code>
+      <span class="dep-name${r.critical ? ' req' : ''}">${escapeHtml(r.name)}</span>
+      <span class="dep-purpose">${escapeHtml(r.why)}</span>
+      <code class="dep-install">${escapeHtml(r.fix)}</code>
     </div>`).join('');
 
   dom.depsDetailsBtn.addEventListener('click', () => {

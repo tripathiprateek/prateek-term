@@ -66,10 +66,19 @@ describe('checkDependencies', () => {
 });
 
 describe('startup dependency-check wiring', () => {
-  test('main exposes a deps:check IPC backed by checkDependencies', () => {
+  test('main exposes a deps:check IPC returning dependencies AND health issues', () => {
     const main = read('src/main/main.js');
     expect(main).toContain("ipcMain.handle('deps:check'");
     expect(main).toContain('checkDependencies');
+    expect(main).toContain('runHealthChecks');
+  });
+
+  test('renderer surfaces outdated versions and health issues, not just missing', () => {
+    const app = read('src/renderer/js/app.js');
+    const fn = app.match(/async function setupDependencyBanner[\s\S]{0,1800}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toContain("versionState === 'outdated'");
+    expect(fn[0]).toContain('issues');
   });
 
   test('preload bridges checkDependencies', () => {
@@ -83,7 +92,7 @@ describe('startup dependency-check wiring', () => {
     const initFn = app.match(/async function init\(\)[\s\S]{0,1700}/);
     expect(initFn[0]).toContain('setupDependencyBanner()');
     // Only shows for missing deps and lists the install hint.
-    const fn = app.match(/async function setupDependencyBanner[\s\S]{0,900}/);
+    const fn = app.match(/async function setupDependencyBanner[\s\S]{0,2200}/);
     expect(fn[0]).toContain('checkDependencies');
     expect(fn[0]).toContain('dep-install');
   });
