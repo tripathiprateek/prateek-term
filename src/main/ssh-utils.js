@@ -223,10 +223,19 @@ function buildJumpHostProxyCommand(profile) {
       ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
     ];
   } else if (profile.proxyPassword) {
+    // Password jump: force password-only auth. Without this the inner ssh tries
+    // publickey FIRST, which queries the SSH agent — and a stale/wedged agent
+    // socket (common on macOS: the socket outlives the process) makes ssh block
+    // forever, so the tunnel never relays the target's banner and the outer
+    // connection dies with "timed out during banner exchange".
     const sshpassPath = findSshpass() || 'sshpass';
     innerParts = [
       sshpassPath, '-p', profile.proxyPassword,
-      'ssh', ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
+      'ssh',
+      '-o', 'PreferredAuthentications=password',
+      '-o', 'PubkeyAuthentication=no',
+      '-o', 'IdentityAgent=none',
+      ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
     ];
   } else {
     innerParts = ['ssh', ...strictOpts, ...jPort, '-W', '%h:%p', jUser];

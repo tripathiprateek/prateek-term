@@ -509,9 +509,14 @@ function createNewWindow(opts = {}) {
   // Force native title bar to show version after page load overrides it
   const versionTitle = `Prateek-Term v${app.getVersion()} (${getBuildNumber()})`;
   win.webContents.on('did-finish-load', () => win.setTitle(versionTitle));
-  // Block reload (Cmd+R on mac, Ctrl+R elsewhere) — it kills all open sessions.
+  // Block the page-reload shortcuts (a reload kills every live session) WITHOUT
+  // swallowing Ctrl+R — the terminal needs Ctrl+R for reverse-history-search.
+  // macOS reload is Cmd+R; F5 reloads on all platforms. Ctrl+R is deliberately
+  // left for the shell: the app menu has no reload accelerator, so Ctrl+R does
+  // not reload on its own. (Previously this also blocked Ctrl+R, which broke
+  // reverse-search in the terminal on every platform.)
   win.webContents.on('before-input-event', (event, input) => {
-    if ((input.meta || input.control) && input.key === 'r') event.preventDefault();
+    if ((input.meta && input.key === 'r') || input.key === 'F5') event.preventDefault();
   });
   return win;
 }
