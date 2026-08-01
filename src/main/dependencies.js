@@ -40,10 +40,12 @@ function dependencySpec() {
       key: 'sshpass', bin: exe('sshpass'), required: false,
       purpose: 'Password auth for jump hosts and for SCP/SFTP over the MCP bridge',
       candidates: win ? [] : withDir('sshpass'),
-      // `sshpass -V` → "sshpass 1.06". 1.06 is from 2011 and mishandles the
-      // keyboard-interactive prompt of modern OpenSSH, hanging instead of
-      // answering; 1.09+ is the first release that reliably works.
-      versionArgs: ['-V'], versionRe: /sshpass\s+(\d+\.\d+)/i, minVersion: '1.09',
+      // `sshpass -V` → "sshpass 1.06". Report the version for diagnostics but
+      // set no minimum: 1.06 is the newest release Homebrew ships and it works
+      // correctly here (verified relaying a jump-host tunnel). An earlier
+      // "1.06 hangs" theory turned out to be a wedged ssh-agent, not sshpass —
+      // see health-checks.js. Don't warn about a tool that demonstrably works.
+      versionArgs: ['-V'], versionRe: /sshpass\s+(\d+\.\d+)/i,
       install: win
         ? 'Not available on Windows — use key-based auth instead.'
         : mac
