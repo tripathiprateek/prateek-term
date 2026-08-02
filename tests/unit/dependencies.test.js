@@ -35,9 +35,15 @@ describe('dependencySpec', () => {
 
 describe('checkDependencies', () => {
   test('marks found/missing from the injected probe and passes candidates through', () => {
+    // Bin names carry a .exe suffix on Windows, so key off the spec's own bin
+    // rather than hardcoding "ssh" — this test must pass on every OS.
     const seen = {};
-    const probe = (bin, candidates) => { seen[bin] = candidates; return bin.startsWith('ssh') && !bin.startsWith('sshpass') ? '/usr/bin/ssh' : null; };
-    const report = checkDependencies(probe);
+    const sshBin = dependencySpec().find((d) => d.key === 'ssh').bin;
+    const probe = (bin, candidates) => {
+      seen[bin] = candidates;
+      return bin === sshBin ? '/usr/bin/ssh' : null;
+    };
+    const report = checkDependencies(probe, () => '');   // no version output
 
     const ssh = report.find((d) => d.key === 'ssh');
     expect(ssh.found).toBe(true);
@@ -49,7 +55,7 @@ describe('checkDependencies', () => {
 
     // candidates array is forwarded to the probe (so GUI-launched apps with a
     // minimal PATH still find Homebrew/user-local binaries).
-    expect(Array.isArray(seen.ssh)).toBe(true);
+    expect(Array.isArray(seen[sshBin])).toBe(true);
   });
 
   test('a throwing probe degrades to "not found" (never crashes startup)', () => {

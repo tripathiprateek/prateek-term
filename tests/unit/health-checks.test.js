@@ -76,14 +76,14 @@ describe('checkSshPermissions', () => {
 
   test('a clean ~/.ssh reports nothing', () => {
     fs.writeFileSync(path.join(home, '.ssh', 'id_rsa'), 'k', { mode: 0o600 });
-    expect(checkSshPermissions({ home })).toEqual([]);
+    expect(checkSshPermissions({ home, platform: 'darwin' })).toEqual([]);
   });
 
   test('flags a directory missing the execute bit (the real root cause)', () => {
     const agentDir = path.join(home, '.ssh', 'agent');
     fs.mkdirSync(agentDir);
     fs.chmodSync(agentDir, 0o600);            // drw------- : cannot be entered
-    const issues = checkSshPermissions({ home });
+    const issues = checkSshPermissions({ home, platform: 'darwin' });
     const hit = issues.find((i) => i.id.includes('agent'));
     expect(hit).toBeTruthy();
     expect(hit.severity).toBe('error');
@@ -94,20 +94,30 @@ describe('checkSshPermissions', () => {
   test('flags a world/group-readable private key', () => {
     const key = path.join(home, '.ssh', 'id_rsa');
     fs.writeFileSync(key, 'k', { mode: 0o644 });
-    const hit = checkSshPermissions({ home }).find((i) => i.id.includes('id_rsa'));
+    const hit = checkSshPermissions({ home, platform: 'darwin' }).find((i) => i.id.includes('id_rsa'));
     expect(hit).toBeTruthy();
     expect(hit.fix).toBe(`chmod 600 ${key}`);
   });
 
   test('ignores .pub files (they are meant to be readable)', () => {
     fs.writeFileSync(path.join(home, '.ssh', 'id_rsa.pub'), 'k', { mode: 0o644 });
-    expect(checkSshPermissions({ home })).toEqual([]);
+    expect(checkSshPermissions({ home, platform: 'darwin' })).toEqual([]);
   });
 
   test('missing ~/.ssh is not an error', () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'pt-nossh-'));
-    expect(checkSshPermissions({ home: empty })).toEqual([]);
+    expect(checkSshPermissions({ home: empty, platform: 'darwin' })).toEqual([]);
     fs.rmSync(empty, { recursive: true, force: true });
+  });
+
+  test('skipped entirely on Windows (no Unix mode bits — it uses ACLs)', () => {
+    // Without this guard Windows synthesises st.mode and every directory would
+    // be falsely reported as "not owner-traversable".
+    const agentDir = path.join(home, '.ssh', 'agent');
+    fs.mkdirSync(agentDir);
+    try { fs.chmodSync(agentDir, 0o600); } catch { /* chmod is a no-op on win32 */ }
+    expect(checkSshPermissions({ home, platform: 'win32' })).toEqual([]);
+    try { fs.chmodSync(agentDir, 0o700); } catch { /* ignore */ }
   });
 });
 

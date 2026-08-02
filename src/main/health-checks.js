@@ -67,7 +67,11 @@ function probeSshAgent({ sock, connect, timeoutMs = 2000 } = {}) {
  * traverse them; private keys must not be group/other readable or ssh rejects
  * them. Returns one issue per offending path.
  */
-function checkSshPermissions({ home, fs = fsDefault } = {}) {
+function checkSshPermissions({ home, fs = fsDefault, platform = process.platform } = {}) {
+  // POSIX-only: Windows has no Unix mode bits (it uses ACLs), so st.mode there
+  // is synthesised and comparing it against 0o700 would flag every directory.
+  if (platform === 'win32') return [];
+
   const base = path.join(home || os.homedir(), '.ssh');
   const issues = [];
   let entries;
