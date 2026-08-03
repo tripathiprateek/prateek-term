@@ -1996,17 +1996,34 @@ function fireOscInjection(tab) {
   // blindly re-enabling only ECHO — which would leave other flags in a broken state.
   window.terminalAPI.sendInput(tab.ptyId, ' _PT_STTY=$(stty -g 2>/dev/null); stty -echo 2>/dev/null\r');
 
-  // Phase 2: setup (leading space → history skip; invisible because echo off)
-  // NOTE: double-quotes inside the JS single-quoted strings are shell double-quotes
-  // (variable expansion). Single-quotes inside are escaped as \' for JS.
-  // \\033 and \\\\ are JS escape sequences that produce the shell literals \033 and \\.
-  setTimeout(() => {
-    if (!tab.ptyId) { finishInjection(); return; }
+  // Phase 2 must not be written until the shell has actually consumed phase 1.
+  // A fixed delay is wrong on slow links (jump host → embedded device): the two
+  // lines then sit in the tty input buffer together and interleave, producing a
+  // mangled command and a visible `syntax error`. So wait for the shell to draw
+  // its next prompt (echo state does not affect the shell's own output), with a
+  // generous fallback if no prompt is recognised.
+  tab._oscFinish = finishInjection;
+  tab._oscPhase2Pending = true;
+  tab._oscPhase2Buf = '';
+  clearTimeout(tab._oscPhase2Timer);
+  tab._oscPhase2Timer = setTimeout(() => sendOscPhase2(tab), 1500);
+}
+
+// Write the OSC 7 setup line. Idempotent — whichever of the prompt-watcher or
+// the fallback timer fires first wins.
+function sendOscPhase2(tab) {
+  if (!tab._oscPhase2Pending) return;
+  tab._oscPhase2Pending = false;
+  clearTimeout(tab._oscPhase2Timer);
+  tab._oscPhase2Timer = null;
+  const finishInjection = tab._oscFinish || (() => {});
+  if (!tab.ptyId) { finishInjection(); return; }
+  {
     const setup =
-      // Leading Ctrl-U (\x15) kills any stray bytes on the line before the
-      // setup runs — belt-and-suspenders in case anything slipped in ahead of
-      // the input gate — so the command below always parses cleanly.
-      '\x15 _pt_cwd(){ printf \'\\033]7;file://%s%s\\033\\\\\' ' +
+      // NO leading Ctrl-U here: it is a tty line-kill, so if phase 1 were still
+      // unconsumed it would destroy it mid-line and corrupt this command. The
+      // input gate already keeps user keystrokes out of the way.
+      ' _pt_cwd(){ printf \'\\033]7;file://%s%s\\033\\\\\' ' +
       '"${HOSTNAME:-$(hostname 2>/dev/null)}" "$PWD"; };' +
       'cd(){ command cd "$@" && _pt_cwd; };' +
       '_pt_cwd;' +
@@ -2025,7 +2042,7 @@ function fireOscInjection(tab) {
     window.terminalAPI.sendInput(tab.ptyId, setup);
     // Release the input gate shortly after phase 2 lands, then flush held input.
     setTimeout(finishInjection, 150);
-  }, 300);
+  }
 }
 
 // Watch PTY output for a shell prompt (SSH tabs only). Called from
@@ -2033,6 +2050,16 @@ function fireOscInjection(tab) {
 // goes quiet at a prompt (debounced 400ms).
 function maybeFireOscInjection(tab, data) {
   if (tab.protocol !== 'ssh') return;
+  // Phase 1 has been sent and we are waiting for the shell to be ready for
+  // phase 2. The shell still prints its prompt with echo off, so a prompt in
+  // the output stream is our signal that phase 1 was consumed.
+  if (tab._oscPhase2Pending) {
+    tab._oscPhase2Buf = ((tab._oscPhase2Buf || '') + data).slice(-256);
+    // eslint-disable-next-line no-control-regex
+    const clean2 = tab._oscPhase2Buf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+    if (/[#$>%]\s*$/.test(clean2)) sendOscPhase2(tab);
+    return;
+  }
   if (tab._oscInjected) return;
   // Password auto-type still pending → keep waiting, we're not at shell yet
   if (tab._pendingPassword) return;

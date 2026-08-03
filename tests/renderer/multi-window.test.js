@@ -230,9 +230,25 @@ describe('OSC cwd injection input-gating', () => {
     expect(fire[0]).toMatch(/setTimeout\(finishInjection, 2000\)/);
   });
 
-  test('phase 2 always restores echo (stty sane fallback) and kills stray input', () => {
-    const fire = appSource.match(/function fireOscInjection\(tab\)[\s\S]{0,3000}/);
-    expect(fire[0]).toContain('stty sane');
-    expect(fire[0]).toContain('\\x15'); // Ctrl-U kill-line prefix
+  test('phase 2 always restores echo (stty sane fallback)', () => {
+    const p2 = appSource.match(/function sendOscPhase2\(tab\)[\s\S]{0,2200}/);
+    expect(p2).not.toBeNull();
+    expect(p2[0]).toContain('stty sane');
+  });
+
+  test('phase 2 carries NO Ctrl-U — it would line-kill an unconsumed phase 1', () => {
+    // A leading \x15 destroyed the still-buffered phase-1 line on slow links
+    // (jump host → embedded device), producing a visible shell syntax error.
+    expect(appSource).not.toContain('\\x15');
+  });
+
+  test('phase 2 waits for the shell prompt, not a fixed delay', () => {
+    // A blind setTimeout let the two lines interleave in the tty input buffer.
+    expect(appSource).toContain('_oscPhase2Pending');
+    const watcher = appSource.match(/if \(tab\._oscPhase2Pending\)[\s\S]{0,400}/);
+    expect(watcher).not.toBeNull();
+    expect(watcher[0]).toContain('sendOscPhase2(tab)');
+    // …with a fallback so a shell we cannot parse still gets set up.
+    expect(appSource).toMatch(/_oscPhase2Timer = setTimeout\(\(\) => sendOscPhase2\(tab\), \d+\)/);
   });
 });

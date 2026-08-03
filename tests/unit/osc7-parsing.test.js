@@ -229,7 +229,6 @@ describe('app.js — injection is hidden from terminal + history', () => {
   test('phase-2 setup ALSO has leading space for history skip', () => {
     // Phase 2 previously started with `_pt_cwd(){...` — no leading space, so it
     // landed in history even when echo was suppressed. Must start with a space.
-    // Now prefixed with Ctrl-U (\x15) to kill any stray bytes, then the space.
-    expect(appSource).toMatch(/\\x15 _pt_cwd\(\)\{ printf/);
+    expect(appSource).toMatch(/' _pt_cwd\(\)\{ printf/);
   });
 });
