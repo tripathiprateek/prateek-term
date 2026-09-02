@@ -51,6 +51,31 @@ function whichBin(name, candidates = []) {
  * The interactive shell to spawn for a local terminal tab.
  * macOS/Linux: $SHELL → zsh → bash → sh. Windows: pwsh → powershell → COMSPEC/cmd.
  */
+// Shells the user could pick as the default for local terminals. POSIX systems
+// list them in /etc/shells; we keep only entries that still exist and are
+// executable, so a stale line never produces an unusable option.
+function listShells() {
+  const out = [];
+  const add = (p) => {
+    if (!p || out.includes(p)) return;
+    try { fs.accessSync(p, fs.constants.X_OK); out.push(p); } catch { /* not usable */ }
+  };
+  if (isWindows()) {
+    const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+    [`${sysRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+     `${sysRoot}\\System32\\cmd.exe`].forEach(add);
+    return out;
+  }
+  try {
+    for (const line of fs.readFileSync('/etc/shells', 'utf8').split('\n')) {
+      const t = line.trim();
+      if (t && !t.startsWith('#')) add(t);
+    }
+  } catch { /* no /etc/shells — fall through to the common set */ }
+  ['/bin/zsh', '/bin/bash', '/bin/sh'].forEach(add);
+  return out;
+}
+
 function findShell() {
   if (isWindows()) {
     const candidates = [
@@ -177,6 +202,7 @@ module.exports = {
   tmpDir,
   whichBin,
   findShell,
+  listShells,
   loginShellArgs,
   shellExec,
   resolveCommand,

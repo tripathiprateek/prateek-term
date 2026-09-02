@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('terminalAPI', {
 
   // Startup dependency check — returns [{ key, found, path, required, purpose, install }].
   checkDependencies: () => ipcRenderer.invoke('deps:check'),
+  listShells: () => ipcRenderer.invoke('shells:list'),
 
   // Cloudflare Access — find the cloudflared binary.
   // Pass an optional user-supplied path; returns { path, version } or null.

@@ -52,6 +52,13 @@ const { runHealthChecks } = require('./health-checks');
 // Startup self-check: which external CLI tools are present and new enough, plus
 // environment problems that silently break SSH (wedged ssh-agent, ~/.ssh
 // permissions). The renderer highlights anything actionable.
+// Shells available for the "Default shell" setting, plus the one the app would
+// pick on its own so the UI can label the "System default" option.
+ipcMain.handle('shells:list', () => ({
+  shells: platform.listShells(),
+  detected: findShell(),
+}));
+
 ipcMain.handle('deps:check', async () => ({
   dependencies: checkDependencies(),
   issues: await runHealthChecks(),

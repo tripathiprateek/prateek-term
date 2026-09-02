@@ -95,7 +95,7 @@ describe('startup dependency-check wiring', () => {
     const app = read('src/renderer/js/app.js');
     expect(app).toContain('async function setupDependencyBanner');
     // init() must invoke it.
-    const initFn = app.match(/async function init\(\)[\s\S]{0,1700}/);
+    const initFn = app.match(/async function init\(\)[\s\S]{0,2400}/);
     expect(initFn[0]).toContain('setupDependencyBanner()');
     // Only shows for missing deps and lists the install hint.
     const fn = app.match(/async function setupDependencyBanner[\s\S]{0,2200}/);

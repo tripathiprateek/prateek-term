@@ -1008,6 +1008,10 @@ async function createTab(options = {}) {
       ptyOptions.args          = shellArgs;
       ptyOptions.env           = extraEnv;
       ptyOptions._cleanupFiles = cleanupFiles;
+    } else if (settingsState.defaultShell) {
+      // Local tab and the user picked a shell — otherwise the main process
+      // falls back to $SHELL on its own.
+      ptyOptions.shell = settingsState.defaultShell;
     }
 
     const result = await window.terminalAPI.createTerminal(ptyOptions);
@@ -4933,6 +4937,7 @@ const DEFAULT_MCP_PORT = 29419;
 
 let settingsState = {
   profilesPath: '',
+  defaultShell: '',        // '' → follow the system default ($SHELL)
   theme: 'catppuccin-mocha',
   debugLogging: false,
   mcpEnabled: false,
@@ -5065,6 +5070,26 @@ function deleteGroup(groupId) {
   renderGroupsList();
 }
 
+// Fill the Default Shell dropdown from the shells actually installed, marking
+// which one "System default" resolves to. A shell saved earlier but since
+// uninstalled is kept as an option so the setting is never silently dropped.
+async function populateShellPicker(current) {
+  const el = document.getElementById('settings-default-shell');
+  if (!el) return;
+  let shells = [];
+  let detected = '';
+  try {
+    const r = await window.terminalAPI.listShells();
+    shells = (r && r.shells) || [];
+    detected = (r && r.detected) || '';
+  } catch { /* keep the System default option only */ }
+  if (current && !shells.includes(current)) shells = [current, ...shells];
+  const label = detected ? `System default (${detected})` : 'System default';
+  el.innerHTML = `<option value="">${escapeHtml(label)}</option>`
+    + shells.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  el.value = current || '';
+}
+
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
@@ -5078,8 +5103,10 @@ async function openSettings() {
     logRotateAgeDays: 30,
     logRotateMaxFiles: 5,
     sidebarCollapsed: false,
+    defaultShell: '',
     ...s,
   };
+  await populateShellPicker(settingsState.defaultShell);
   // Populate rotation inputs
   const rotSizeEl     = document.getElementById('log-rotate-size');
   const rotAgeEl      = document.getElementById('log-rotate-age');
@@ -5327,6 +5354,9 @@ async function saveSettings() {
   if (rotAgeEl)   settingsState.logRotateAgeDays  = Math.max(0, parseInt(rotAgeEl.value,   10) || 0);
   if (rotMaxEl)   settingsState.logRotateMaxFiles = Math.max(1, parseInt(rotMaxEl.value,   10) || 1);
 
+  const shellEl = document.getElementById('settings-default-shell');
+  if (shellEl) settingsState.defaultShell = shellEl.value || '';
+
   await window.terminalAPI.saveSettings(settingsState);
   applyTheme(settingsState.theme);
   setSettingsStatus('Settings saved.');
@@ -5515,6 +5545,9 @@ async function init() {
     }
     // Apply saved theme before rendering anything
     const savedSettings = await window.terminalAPI.loadSettings();
+    // Seed the shell choice now — new local tabs read it before Settings is
+    // ever opened, which is where settingsState would otherwise be populated.
+    settingsState.defaultShell = savedSettings.defaultShell || '';
     state.currentTheme = savedSettings.theme || 'catppuccin-mocha';
     applyTheme(state.currentTheme);
     // Restore persisted sidebar collapsed state
