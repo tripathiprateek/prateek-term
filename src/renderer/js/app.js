@@ -5531,9 +5531,29 @@ function applyPlatformUI() {
   });
 }
 
+// Show "Prateek-Term v<version> (<build>)" in the custom titlebar. macOS hides
+// the native title (titleBarStyle: hiddenInset), so this span is the only place
+// the version and build number are visible. Kept at the START of init() and
+// self-contained: when it ran last, any earlier failure (a bad session restore,
+// say) left the static "Prateek-Term" placeholder and the build number simply
+// vanished with no clue why — invisible whenever debug logging was off.
+async function showVersionInTitle() {
+  try {
+    const vInfo = await window.terminalAPI.getVersionInfo();
+    if (!vInfo) return;
+    const titleText = `Prateek-Term v${vInfo.version} (${vInfo.buildNum})`;
+    document.title = titleText;
+    const appNameEl = document.querySelector('.titlebar-app-name');
+    if (appNameEl) appNameEl.textContent = titleText;
+  } catch (e) {
+    try { window.terminalAPI.logRendererError(`title/version: ${e?.message || e}`); } catch { /* ignore */ }
+  }
+}
+
 async function init() {
   try {
     applyPlatformUI();
+    await showVersionInTitle();
     await loadXtermModules();
     setupTerminalListeners();
     initTabScrollButtons();
@@ -5567,16 +5587,6 @@ async function init() {
     window.terminalAPI.rendererReady();   // flush any buffered open-folder URLs
     setupUpdateBanner();
     setupDependencyBanner();   // probe external CLI deps, highlight any missing
-    // Set window title with version and build number
-    try {
-      const vInfo = await window.terminalAPI.getVersionInfo();
-      if (vInfo) {
-        const titleText = `Prateek-Term v${vInfo.version} (${vInfo.buildNum})`;
-        document.title = titleText;
-        const appNameEl = document.querySelector('.titlebar-app-name');
-        if (appNameEl) appNameEl.textContent = titleText;
-      }
-    } catch { /* non-critical */ }
   } catch (err) {
     // Surface crash to main-process debug log so it shows in Settings → Developer
     try { window.terminalAPI.logRendererError(`init() crash: ${err?.stack || err}`); } catch {}

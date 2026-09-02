@@ -78,3 +78,33 @@ describe('wiring', () => {
     expect(fn[0]).toContain('!shells.includes(current)');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Version/build number in the titlebar
+// ---------------------------------------------------------------------------
+describe('titlebar shows version + build number', () => {
+  const app  = read('src/renderer/js/app.js');
+  const main = read('src/main/main.js');
+
+  test('getVersionInfo returns a buildNum (never undefined)', () => {
+    expect(main).toContain("buildNum: buildNum || 'dev'");
+  });
+
+  test('the title is set FIRST in init(), not after session restore', () => {
+    // It used to run last, so any earlier failure left the static
+    // "Prateek-Term" placeholder and the build number silently disappeared.
+    const initFn = app.match(/async function init\(\)[\s\S]{0,300}/);
+    expect(initFn[0]).toContain('showVersionInTitle()');
+    const idxTitle   = app.indexOf('await showVersionInTitle()');
+    const idxRestore = app.indexOf('await restoreSession()');
+    expect(idxTitle).toBeGreaterThan(-1);
+    expect(idxTitle).toBeLessThan(idxRestore);
+  });
+
+  test('it is self-contained and logs rather than failing silently', () => {
+    const fn = app.match(/async function showVersionInTitle\(\)[\s\S]{0,700}/);
+    expect(fn[0]).toContain('titlebar-app-name');
+    expect(fn[0]).toContain('vInfo.buildNum');
+    expect(fn[0]).toContain('logRendererError');
+  });
+});
