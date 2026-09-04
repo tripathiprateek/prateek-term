@@ -76,6 +76,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # install.sh is curl|sh-ed straight from main, so a syntax slip there is
+      # shipped to users instantly. One runner is enough.
+      - name: Shellcheck install.sh
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck install.sh
+
       - name: Test
         run: npm test
 
@@ -263,11 +271,36 @@ jobs:
           DOCS=$(get_commits "docs")
           CHORES=$(get_commits "chore|ci|test")
 
+          # Pre-release tags install from the @rc / -rc channel.
+          case "$TAG" in
+            *-rc.*|*-beta.*) CASK='prateek-term@rc'; SCOOP='prateek-term-rc'; CHAN=' -s -- --channel rc' ;;
+            *)               CASK='prateek-term';    SCOOP='prateek-term';    CHAN='' ;;
+          esac
+
           BODY="## Prateek-Term ${VERSION}
 
           Cross-platform — macOS, Windows, and Linux.
 
-          ### Download
+          ### Install
+
+          **macOS** (Apple Silicon)
+          \`\`\`sh
+          brew tap tripathiprateek/prateek-term
+          brew install --cask --no-quarantine ${CASK}
+          \`\`\`
+
+          **Linux** (x64 / ARM64)
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh${CHAN}
+          \`\`\`
+
+          **Windows** (x64 / ARM64)
+          \`\`\`powershell
+          scoop bucket add prateek-term https://github.com/tripathiprateek/scoop-prateek-term
+          scoop install ${SCOOP}
+          \`\`\`
+
+          ### Or download directly
           | Platform | File |
           |----------|------|
           | macOS (Apple Silicon) | \`Prateek-Term-${VERSION}-arm64.dmg\` |
@@ -275,8 +308,11 @@ jobs:
           | Windows ARM64 | \`Prateek-Term-Setup-${VERSION}-arm64.exe\` (installer) / \`-portable.exe\` |
           | Linux x64 / ARM64 | \`Prateek-Term-${VERSION}[-arm64].AppImage\` / \`.deb\` |
 
-          > **macOS:** ad-hoc signed — right-click the app -> Open -> Open anyway if Gatekeeper warns.
-          > **Windows:** unsigned — click \"More info\" -> \"Run anyway\" on the SmartScreen prompt.
+          Verify any download against \`SHA256SUMS\`, published with this release.
+
+          > **macOS:** ad-hoc signed, not notarized — hence \`--no-quarantine\`. Downloading the .dmg directly instead? Right-click the app -> Open -> Open anyway.
+          > **Windows:** unsigned. Scoop avoids SmartScreen by extracting a zip; the .exe installer will prompt — click \"More info\" -> \"Run anyway\".
+          > **Linux:** the \`.deb\` is a manual \`dpkg -i\` install. Use the script above for managed upgrades.
           "
 
           [ -n "$FEATS" ]     && BODY="${BODY}

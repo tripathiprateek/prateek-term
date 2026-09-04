@@ -78,13 +78,76 @@ No plugins. No wrappers. Built in.
 
 ### Install
 
-Download the latest build for your OS from [Releases](https://github.com/tripathiprateek/prateek-term/releases):
+**macOS** (Apple Silicon)
+
+```sh
+brew tap tripathiprateek/prateek-term
+brew install --cask --no-quarantine prateek-term
+```
+
+**Linux** (x64 / ARM64)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh
+```
+
+**Windows** (x64 / ARM64)
+
+```powershell
+scoop bucket add prateek-term https://github.com/tripathiprateek/scoop-prateek-term
+scoop install prateek-term
+```
+
+<details>
+<summary>Release candidates, options and uninstalling</summary>
+
+Release candidates ship from a separate channel. Installing one opts you in —
+you keep getting RCs, and the final release when it lands.
+
+```sh
+brew install --cask --no-quarantine prateek-term@rc                 # macOS
+curl -fsSL .../install.sh | sh -s -- --channel rc                   # Linux
+scoop install prateek-term-rc                                       # Windows
+```
+
+The Linux script takes `--channel stable|rc`, `--version vX.Y.Z` and
+`--uninstall`. Arguments must come after `-s --`, because the script is being
+piped into `sh`:
+
+```sh
+curl -fsSL .../install.sh | sh -s -- --uninstall
+```
+
+No Scoop? There is a PowerShell equivalent. `irm | iex` cannot take parameters,
+so pass them via a scriptblock:
+
+```powershell
+irm https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.ps1 | iex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.ps1))) -Channel rc
+```
+
+**Why `--no-quarantine`?** The app is ad-hoc signed but not notarized (no paid
+Apple Developer account), and Homebrew quarantines by default, which makes
+Gatekeeper refuse to open it. Verify your download against the `SHA256SUMS`
+published with every release instead.
+
+**Windows and SmartScreen.** The app is unsigned, so the `.exe` installer
+triggers "Windows protected your PC". Scoop and `install.ps1` extract a zip
+rather than launching a downloaded executable, so neither hits SmartScreen.
+
+**macOS is Apple Silicon only.** The cask declares `depends_on arch: :arm64`, so
+Intel Macs get a clear error rather than an app that cannot launch.
+
+</details>
+
+Prefer to download by hand? Grab a build from
+[Releases](https://github.com/tripathiprateek/prateek-term/releases):
 
 | Platform | File | Notes |
 |----------|------|-------|
 | **macOS** (Apple Silicon) | `.dmg` | Open it, drag Prateek-Term to Applications. Ad-hoc signed — if Gatekeeper warns, right-click → Open → Open anyway. |
 | **Windows** | `Setup .exe` (installer) or portable `.exe` | Unsigned — on the SmartScreen prompt click **More info → Run anyway**. |
-| **Linux** | `.AppImage` (any distro) or `.deb` (Debian/Ubuntu) | `chmod +x *.AppImage && ./*.AppImage`, or `sudo dpkg -i *.deb`. |
+| **Linux** | `.AppImage` (any distro) or `.deb` (Debian/Ubuntu) | `chmod +x *.AppImage && ./*.AppImage`, or `sudo dpkg -i *.deb`. The `.deb` is not managed by the install script: under dpkg an RC sorts as *newer* than the final release, so apt would refuse the upgrade. |
 
 After install you can register the OS integration ("Open in Prateek-Term") from **Settings**: a Finder Quick Action on macOS, a right-click folder menu on Windows, and a `.desktop` entry + `prateekterm://` handler on Linux.
 
