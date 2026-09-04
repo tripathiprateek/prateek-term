@@ -20,6 +20,36 @@ defaults:
     shell: bash
 
 jobs:
+  # ─── Version guard ────────────────────────────────────────────────────────
+  # A tag whose name disagrees with package.json produces a release whose title,
+  # assets and in-app update check all disagree with each other. This job always
+  # runs and self-exits for non-tag builds: putting an `if:` on the job itself
+  # would make it "skipped", and a skipped `needs` dependency skips `build` too,
+  # so nothing would ever build on main.
+  guard:
+    name: Version guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match package.json; pre-release tags must be well-formed
+        run: |
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *) echo "Not a tag build — nothing to check."; exit 0 ;;
+          esac
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json=$PKG  tag=$TAG"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag v$TAG does not match package.json $PKG"; exit 1
+          fi
+          case "$TAG" in
+            *-*)
+              echo "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-(rc|beta)\.[0-9]+$' \
+                || { echo "::error::pre-release tag must be X.Y.Z-rc.N or X.Y.Z-beta.N"; exit 1; } ;;
+          esac
+          echo "Version guard passed."
+
   # ─── Lint & Test (all three OSes) ─────────────────────────────────────────
   test:
     name: Lint & Test (${{ matrix.os }})
@@ -57,7 +87,7 @@ jobs:
   # its own architecture.
   build:
     name: Build (${{ matrix.name }})
-    needs: test
+    needs: [test, guard]
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
@@ -193,6 +223,22 @@ jobs:
           find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.yml' \) -exec cp {} dist/ \;
           ls -la dist/
 
+      # SHA256SUMS is what install.sh / install.ps1 verify against, and what the
+      # cask + Scoop manifests take their hashes from. Bare filenames and the
+      # two-space separator matter: install.sh does `grep " <file>$" | sha256sum -c -`.
+      - name: Prune non-installer artifacts and generate SHA256SUMS
+        working-directory: dist
+        run: |
+          rm -f ./*.blockmap latest*.yml builder-debug.yml SHA256SUMS
+          sha256sum $(ls -1) > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload checksums for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: dist/SHA256SUMS
+
       - name: Generate release notes
         id: notes
         run: |
@@ -260,6 +306,14 @@ jobs:
         with:
           name: "Prateek-Term ${{ needs.build.outputs.version }}"
           body_path: release-notes.md
-          files: dist/*
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/SHA256SUMS
+            install.sh
+            install.ps1
           draft: false
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

@@ -147,14 +147,17 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "win": {
       "icon": "build/icon.png",
       "target": [
         "nsis",
-        "portable"
-      ]
+        "portable",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -229,6 +232,9 @@
       "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.map}",
       "!node_modules/**/test{s,}/**",
       "!node_modules/**/*.{ts,d.ts}"
-    ]
+    ],
+    "appImage": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
   }
 }
