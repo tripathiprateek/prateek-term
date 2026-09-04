@@ -8,17 +8,20 @@
     },
     "architecture": {
         "64bit": {
-            "url": "https://github.com/tripathiprateek/prateek-term/releases/download/v1.5.0/Prateek-Term-1.5.0-x64.zip",
+            "url": "https://github.com/tripathiprateek/prateek-term/releases/download/v1.5.0/Prateek-Term-1.5.0-win-x64.zip",
             "hash": "0000000000000000000000000000000000000000000000000000000000000000"
         },
         "arm64": {
-            "url": "https://github.com/tripathiprateek/prateek-term/releases/download/v1.5.0/Prateek-Term-1.5.0-arm64.zip",
+            "url": "https://github.com/tripathiprateek/prateek-term/releases/download/v1.5.0/Prateek-Term-1.5.0-win-arm64.zip",
             "hash": "0000000000000000000000000000000000000000000000000000000000000000"
         }
     },
     "bin": "Prateek-Term.exe",
     "shortcuts": [
-        ["Prateek-Term.exe", "Prateek-Term"]
+        [
+            "Prateek-Term.exe",
+            "Prateek-Term"
+        ]
     ],
     "checkver": {
         "url": "https://api.github.com/repos/tripathiprateek/prateek-term/releases",

@@ -78,8 +78,12 @@ esac
 
 command -v curl >/dev/null 2>&1 || die "curl is required."
 
+# electron-builder names AppImages with the AppImage arch convention: x86_64
+# (NOT x64, which it uses for every other target) and arm64. Verified against
+# the published v1.5.0-rc.1 assets — an earlier x64 guess 404'd on every Intel
+# and AMD machine.
 case "$(uname -m)" in
-  x86_64|amd64)  ARCH=x64 ;;
+  x86_64|amd64)  ARCH=x86_64 ;;
   aarch64|arm64) ARCH=arm64 ;;
   *) die "unsupported architecture: $(uname -m) (x86_64 and aarch64 are supported)" ;;
 esac

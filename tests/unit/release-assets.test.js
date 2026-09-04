@@ -43,21 +43,48 @@ describe('artifact names are explicit (not electron-builder defaults)', () => {
 describe('the exact filenames the installers build URLs from', () => {
   test('macOS zip — consumed by the Homebrew cask', () => {
     expect(name(pkg.build.mac.artifactName, 'arm64', 'zip'))
-      .toBe('Prateek-Term-1.5.0-rc.1-arm64.zip');
+      .toBe('Prateek-Term-1.5.0-rc.1-mac-arm64.zip');
   });
 
   test('Windows zip — consumed by the Scoop manifest, both arches', () => {
     expect(name(pkg.build.win.artifactName, 'x64', 'zip'))
-      .toBe('Prateek-Term-1.5.0-rc.1-x64.zip');
+      .toBe('Prateek-Term-1.5.0-rc.1-win-x64.zip');
     expect(name(pkg.build.win.artifactName, 'arm64', 'zip'))
-      .toBe('Prateek-Term-1.5.0-rc.1-arm64.zip');
+      .toBe('Prateek-Term-1.5.0-rc.1-win-arm64.zip');
+  });
+
+  test('no two platforms can produce the same filename', () => {
+    // v1.5.0-rc.1 shipped with mac and win BOTH rendering
+    // Prateek-Term-<v>-arm64.zip. CI flattens every runner's artifacts into one
+    // directory, so the second copy silently overwrote the first and Scoop's
+    // arm64 entry pointed at a macOS .app bundle.
+    const rendered = [];
+    for (const [target, exts] of [['mac', ['zip', 'dmg']], ['win', ['zip']], ['appImage', ['AppImage']]]) {
+      for (const arch of ['x64', 'x86_64', 'arm64']) {
+        for (const ext of exts) rendered.push(name(pkg.build[target].artifactName, arch, ext));
+      }
+    }
+    expect(new Set(rendered).size).toBe(rendered.length);
   });
 
   test('AppImage — consumed by install.sh, both arches', () => {
-    expect(name(pkg.build.appImage.artifactName, 'x64', 'AppImage'))
-      .toBe('Prateek-Term-1.5.0-rc.1-x64.AppImage');
+    // electron-builder substitutes ${arch} as x86_64 for AppImage (the AppImage
+    // convention), NOT x64 like every other target. Confirmed against the real
+    // published assets — asserting x64 here previously passed while install.sh
+    // 404'd on every Intel/AMD machine.
+    expect(name(pkg.build.appImage.artifactName, 'x86_64', 'AppImage'))
+      .toBe('Prateek-Term-1.5.0-rc.1-x86_64.AppImage');
     expect(name(pkg.build.appImage.artifactName, 'arm64', 'AppImage'))
       .toBe('Prateek-Term-1.5.0-rc.1-arm64.AppImage');
+  });
+
+  test('install.sh asks for the arch names electron-builder actually emits', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const sh = fs.readFileSync(path.join(__dirname, '../../install.sh'), 'utf8');
+    expect(sh).toMatch(/x86_64\|amd64\)\s+ARCH=x86_64/);
+    expect(sh).toMatch(/aarch64\|arm64\)\s+ARCH=arm64/);
+    expect(sh).toContain('Prateek-Term-${VERSION}-${ARCH}.AppImage');
   });
 });
 

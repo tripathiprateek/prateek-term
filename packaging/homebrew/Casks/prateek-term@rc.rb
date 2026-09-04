@@ -2,7 +2,7 @@ cask "prateek-term@rc" do
   version "1.5.0-rc.1"
   sha256 :no_check # replaced by CI on each release
 
-  url "https://github.com/tripathiprateek/prateek-term/releases/download/v#{version}/Prateek-Term-#{version}-arm64.zip"
+  url "https://github.com/tripathiprateek/prateek-term/releases/download/v#{version}/Prateek-Term-#{version}-mac-arm64.zip"
   name "Prateek-Term (Release Candidate)"
   desc "Terminal emulator and SSH/serial connection manager"
   homepage "https://github.com/tripathiprateek/prateek-term"

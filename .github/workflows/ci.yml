@@ -382,9 +382,9 @@ jobs:
           {
             echo "version=$VERSION"
             echo "prerelease=$PRE"
-            echo "mac=$(sha "Prateek-Term-${VERSION}-arm64.zip")"
-            echo "win_x64=$(sha "Prateek-Term-${VERSION}-x64.zip")"
-            echo "win_arm64=$(sha "Prateek-Term-${VERSION}-arm64.zip")"
+            echo "mac=$(sha "Prateek-Term-${VERSION}-mac-arm64.zip")"
+            echo "win_x64=$(sha "Prateek-Term-${VERSION}-win-x64.zip")"
+            echo "win_arm64=$(sha "Prateek-Term-${VERSION}-win-arm64.zip")"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -424,8 +424,8 @@ jobs:
             const [f, v, base, h64, harm] = process.argv.slice(1);
             const m = JSON.parse(fs.readFileSync(f, "utf8"));
             m.version = v;
-            m.architecture["64bit"] = { url: `${base}/Prateek-Term-${v}-x64.zip`,   hash: h64  };
-            m.architecture["arm64"] = { url: `${base}/Prateek-Term-${v}-arm64.zip`, hash: harm };
+            m.architecture["64bit"] = { url: `${base}/Prateek-Term-${v}-win-x64.zip`,   hash: h64  };
+            m.architecture["arm64"] = { url: `${base}/Prateek-Term-${v}-win-arm64.zip`, hash: harm };
             fs.writeFileSync(f, JSON.stringify(m, null, 4) + "\n");
           ' "bucket/bucket/${M}.json" \
             "${{ steps.v.outputs.version }}" \
