@@ -83,7 +83,7 @@ No plugins. No wrappers. Built in.
 ```sh
 brew tap tripathiprateek/prateek-term
 brew trust tripathiprateek/prateek-term      # Homebrew 6+ requires trusting third-party cask taps
-brew install --cask --no-quarantine prateek-term
+brew install --cask prateek-term
 ```
 
 **Linux** (x64 / ARM64)
@@ -106,7 +106,7 @@ Release candidates ship from a separate channel. Installing one opts you in —
 you keep getting RCs, and the final release when it lands.
 
 ```sh
-brew install --cask --no-quarantine prateek-term@rc                 # macOS
+brew install --cask prateek-term@rc                                  # macOS
 curl -fsSL .../install.sh | sh -s -- --channel rc                   # Linux
 scoop install prateek-term-rc                                       # Windows
 ```
@@ -127,10 +127,16 @@ irm https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.ps1))) -Channel rc
 ```
 
-**Why `--no-quarantine`?** The app is ad-hoc signed but not notarized (no paid
-Apple Developer account), and Homebrew quarantines by default, which makes
-Gatekeeper refuse to open it. Verify your download against the `SHA256SUMS`
-published with every release instead.
+**Gatekeeper.** The app is ad-hoc signed but not notarized (no paid Apple
+Developer account), so macOS may refuse the first launch. Homebrew 6 removed the
+old `--no-quarantine` flag, so if that happens:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Prateek-Term.app
+```
+
+or right-click the app → Open → Open. Verify your download against the
+`SHA256SUMS` published with every release.
 
 **Windows and SmartScreen.** The app is unsigned, so the `.exe` installer
 triggers "Windows protected your PC". Scoop and `install.ps1` extract a zip

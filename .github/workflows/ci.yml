@@ -287,7 +287,7 @@ jobs:
           \`\`\`sh
           brew tap tripathiprateek/prateek-term
           brew trust tripathiprateek/prateek-term
-          brew install --cask --no-quarantine ${CASK}
+          brew install --cask ${CASK}
           \`\`\`
 
           **Linux** (x64 / ARM64)
@@ -311,7 +311,7 @@ jobs:
 
           Verify any download against \`SHA256SUMS\`, published with this release.
 
-          > **macOS:** ad-hoc signed, not notarized — hence \`--no-quarantine\`. Downloading the .dmg directly instead? Right-click the app -> Open -> Open anyway.
+          > **macOS:** ad-hoc signed, not notarized. If Gatekeeper refuses the first launch, run \`xattr -dr com.apple.quarantine /Applications/Prateek-Term.app\` or right-click the app -> Open -> Open.
           > **Windows:** unsigned. Scoop avoids SmartScreen by extracting a zip; the .exe installer will prompt — click \"More info\" -> \"Run anyway\".
           > **Linux:** the \`.deb\` is a manual \`dpkg -i\` install. Use the script above for managed upgrades.
           "
@@ -398,7 +398,10 @@ jobs:
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/tripathiprateek/homebrew-prateek-term.git" tap
           if [ "${{ steps.v.outputs.prerelease }}" = true ]; then CASK='prateek-term@rc'; else CASK='prateek-term'; fi
           f="tap/Casks/${CASK}.rb"
-          [ -f "$f" ] || cp "packaging/homebrew/Casks/${CASK}.rb" "$f"
+          # Always overwrite: packaging/ is the source of truth. Copying only
+          # when absent left a stale url in the tap after the artifact rename,
+          # so the cask pointed at a file that no longer existed.
+          cp "packaging/homebrew/Casks/${CASK}.rb" "$f"
           sed -i -E "s|^( *version )\".*\"|\1\"${{ steps.v.outputs.version }}\"|" "$f"
           sed -i -E "s|^( *sha256 ).*|\1\"${{ steps.v.outputs.mac }}\"|"        "$f"
           cd tap
@@ -418,7 +421,7 @@ jobs:
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/tripathiprateek/scoop-prateek-term.git" bucket
           if [ "${{ steps.v.outputs.prerelease }}" = true ]; then M='prateek-term-rc'; else M='prateek-term'; fi
           mkdir -p bucket/bucket
-          [ -f "bucket/bucket/${M}.json" ] || cp "packaging/scoop/bucket/${M}.json" "bucket/bucket/${M}.json"
+          cp "packaging/scoop/bucket/${M}.json" "bucket/bucket/${M}.json"
           node -e '
             const fs = require("fs");
             const [f, v, base, h64, harm] = process.argv.slice(1);

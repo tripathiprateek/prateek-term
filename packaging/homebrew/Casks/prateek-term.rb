@@ -22,15 +22,16 @@ cask "prateek-term" do
 
   app "Prateek-Term.app"
 
-  # The app is ad-hoc signed, not notarized, so Homebrew's default quarantine
-  # produces a Gatekeeper block. Users must pass --no-quarantine.
-  caveats do
-    <<~EOS
-      Prateek-Term is ad-hoc signed (not notarized). If macOS refuses to open it,
-      reinstall with:
-        brew reinstall --cask --no-quarantine prateek-term
-    EOS
-  end
+  # Ad-hoc signed, not notarized. Homebrew 6 removed --no-quarantine, so the app
+  # arrives quarantined and Gatekeeper may refuse the first launch.
+  caveats <<~EOS
+    Prateek-Term is ad-hoc signed, not notarized. If macOS refuses to open it:
+
+      xattr -dr com.apple.quarantine /Applications/Prateek-Term.app
+
+    or right-click the app -> Open -> Open, or allow it under
+    System Settings -> Privacy & Security.
+  EOS
 
   zap trash: [
     "~/Library/Application Support/Prateek-Term",
