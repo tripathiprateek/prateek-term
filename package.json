@@ -1,6 +1,6 @@
 {
   "name": "prateek-term",
-  "version": "1.5.0-beta.2",
+  "version": "1.5.0-rc.1",
   "description": "Prateek-Term - A cross-platform (macOS, Windows, Linux) terminal emulator and SSH connection manager",
   "main": "src/main/main.js",
   "scripts": {
