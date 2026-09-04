@@ -24,7 +24,7 @@
     "rebuild:native": "electron-rebuild -f -w default_terminal --module-dir src/native"
   },
   "author": "Prateek",
-  "license": "MIT",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
   "homepage": "https://github.com/tripathiprateek/prateek-term",
   "repository": {
     "type": "git",
