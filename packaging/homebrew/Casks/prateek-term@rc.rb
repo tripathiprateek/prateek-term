@@ -2,8 +2,7 @@ cask "prateek-term@rc" do
   version "1.5.0-rc.1"
   sha256 :no_check # replaced by CI on each release
 
-  url "https://github.com/tripathiprateek/prateek-term/releases/download/v#{version}/Prateek-Term-#{version}-arm64.zip",
-      verified: "github.com/tripathiprateek/prateek-term/"
+  url "https://github.com/tripathiprateek/prateek-term/releases/download/v#{version}/Prateek-Term-#{version}-arm64.zip"
   name "Prateek-Term (Release Candidate)"
   desc "Terminal emulator and SSH/serial connection manager"
   homepage "https://github.com/tripathiprateek/prateek-term"
@@ -17,7 +16,7 @@ cask "prateek-term@rc" do
   # The build is arm64-only. Failing loudly here beats installing an app that
   # cannot launch on Intel.
   depends_on arch: :arm64
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   # Both casks install the same Prateek-Term.app, so they genuinely collide.
   conflicts_with cask: "prateek-term"

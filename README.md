@@ -82,6 +82,7 @@ No plugins. No wrappers. Built in.
 
 ```sh
 brew tap tripathiprateek/prateek-term
+brew trust tripathiprateek/prateek-term      # Homebrew 6+ requires trusting third-party cask taps
 brew install --cask --no-quarantine prateek-term
 ```
 

@@ -286,6 +286,7 @@ jobs:
           **macOS** (Apple Silicon)
           \`\`\`sh
           brew tap tripathiprateek/prateek-term
+          brew trust tripathiprateek/prateek-term
           brew install --cask --no-quarantine ${CASK}
           \`\`\`
 
