@@ -4938,6 +4938,7 @@ const DEFAULT_MCP_PORT = 29419;
 let settingsState = {
   profilesPath: '',
   defaultShell: '',        // '' → follow the system default ($SHELL)
+  updateChannel: 'auto',   // auto → RCs only if this build is itself an RC
   theme: 'catppuccin-mocha',
   debugLogging: false,
   mcpEnabled: false,
@@ -5104,9 +5105,12 @@ async function openSettings() {
     logRotateMaxFiles: 5,
     sidebarCollapsed: false,
     defaultShell: '',
+    updateChannel: 'auto',
     ...s,
   };
   await populateShellPicker(settingsState.defaultShell);
+  const chanEl = document.getElementById('settings-update-channel');
+  if (chanEl) chanEl.value = settingsState.updateChannel || 'auto';
   // Populate rotation inputs
   const rotSizeEl     = document.getElementById('log-rotate-size');
   const rotAgeEl      = document.getElementById('log-rotate-age');
@@ -5356,6 +5360,8 @@ async function saveSettings() {
 
   const shellEl = document.getElementById('settings-default-shell');
   if (shellEl) settingsState.defaultShell = shellEl.value || '';
+  const chanEl = document.getElementById('settings-update-channel');
+  if (chanEl) settingsState.updateChannel = chanEl.value || 'auto';
 
   await window.terminalAPI.saveSettings(settingsState);
   applyTheme(settingsState.theme);

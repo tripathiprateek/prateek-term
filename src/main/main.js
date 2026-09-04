@@ -92,31 +92,34 @@ function getVersionInfo() {
   } else if (/-/.test(version)) {
     channel = 'Pre-release';
   }
-  return { version, buildNum: buildNum || 'dev', channel };
+  return {
+    version,
+    buildNum: buildNum || 'dev',
+    channel,
+    updateChannel: resolveChannel(loadSettings().updateChannel, version),
+  };
 }
 
-/**
- * Compare two semver strings (ignores pre-release suffixes for the numeric part).
- * Returns true if remote version number is strictly greater than local.
- */
-function isVersionNewer(remote, local) {
-  const nums = (v) => v.replace(/^v/, '').split('-')[0].split('.').map(Number);
-  const [rM, rm, rp] = nums(remote);
-  const [lM, lm, lp] = nums(local);
-  if (rM !== lM) return rM > lM;
-  if (rm !== lm) return rm > lm;
-  return rp > lp;
-}
+// Full SemVer precedence incl. pre-release ordering, plus channel selection.
+// Kept in its own module so it is unit-testable — main.js requires electron and
+// cannot be loaded under Jest, which is how the old comparator's bug survived.
+const { isVersionNewer, resolveChannel, pickCandidate } = require('./version');
 
 const RELEASES_API = 'https://api.github.com/repos/tripathiprateek/prateek-term/releases';
 const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 /**
  * Fetch the latest GitHub release and notify the renderer if a newer version
- * is available. Pass includePrerelease=true to surface RC/beta releases.
+ * is available. The channel comes from settings (updateChannel), or from
+ * opts.channel when a caller wants to override it for one check.
  */
-async function checkForUpdates(includePrerelease = false) {
-  dbgLog(`[update] checking releases includePrerelease=${includePrerelease}`);
+async function checkForUpdates(opts = {}) {
+  const localVersion = app.getVersion();
+  const channel = resolveChannel(
+    opts.channel !== undefined ? opts.channel : loadSettings().updateChannel,
+    localVersion,
+  );
+  dbgLog(`[update] checking releases channel=${channel}`);
   try {
     const res = await fetch(`${RELEASES_API}?per_page=10`, {
       headers: { 'User-Agent': 'prateek-term', Accept: 'application/vnd.github.v3+json' },
@@ -129,15 +132,16 @@ async function checkForUpdates(includePrerelease = false) {
     const releases = await res.json();
     if (!Array.isArray(releases)) return null;
 
-    // Find the newest release matching channel preference
-    const candidate = releases.find(r => !r.draft && (includePrerelease || !r.prerelease));
+    // Newest by SemVer, not by creation date: the API is date-ordered, so a
+    // 1.4.1 hotfix published after 1.5.0 would otherwise be offered as an
+    // "update" to everyone — a downgrade.
+    const candidate = pickCandidate(releases, channel);
     if (!candidate) {
       dbgLog('[update] no suitable release found');
       return null;
     }
 
     const remoteVersion = (candidate.tag_name || '').replace(/^v/, '');
-    const localVersion  = app.getVersion();
     dbgLog(`[update] local=${localVersion} remote=${remoteVersion} prerelease=${candidate.prerelease}`);
     if (remoteVersion && isVersionNewer(remoteVersion, localVersion)) {
       dbgLog(`[update] update available: ${localVersion} → ${remoteVersion}`);
@@ -145,6 +149,7 @@ async function checkForUpdates(includePrerelease = false) {
         version:    remoteVersion,
         url:        candidate.html_url,
         prerelease: candidate.prerelease,
+        channel,
       };
       // Notify all open windows
       BrowserWindow.getAllWindows().forEach(win => {
@@ -1506,7 +1511,7 @@ ipcMain.handle('defaultTerminal:set', () => {
 });
 
 // ── Update IPC ───────────────────────────────────────────────────────────
-ipcMain.handle('update:check',       (_, opts) => checkForUpdates(opts?.includePrerelease));
+ipcMain.handle('update:check',       (_, opts) => checkForUpdates(opts || {}));
 ipcMain.handle('update:get-version', ()        => getVersionInfo());
 ipcMain.on(   'update:open-url',     (_, url)  => {
   try {

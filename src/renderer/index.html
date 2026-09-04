@@ -984,6 +984,25 @@
 
             <div class="settings-divider"></div>
 
+            <!-- Updates -->
+            <section class="settings-section">
+              <h3 class="settings-section-title">Updates</h3>
+              <p class="settings-section-desc">
+                Which releases you are notified about. "Automatic" follows release
+                candidates only if you are already running one — so installing an RC
+                opts you in, and you still get the final release when it ships.
+              </p>
+              <div class="settings-row">
+                <select id="settings-update-channel" class="settings-input">
+                  <option value="auto">Automatic (recommended)</option>
+                  <option value="stable">Stable releases only</option>
+                  <option value="rc">Include release candidates</option>
+                </select>
+              </div>
+            </section>
+
+            <div class="settings-divider"></div>
+
             <!-- Tab Organization -->
             <section class="settings-section">
               <h3 class="settings-section-title">Tab Organization</h3>
