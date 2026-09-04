@@ -317,3 +317,86 @@ jobs:
             install.ps1
           draft: false
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+
+  # ─── Update Homebrew tap + Scoop bucket ───────────────────────────────────
+  # Kept separate from `release` so a token expiry or a transient push failure
+  # can be re-run on its own without re-publishing the GitHub release.
+  # Needs PACKAGE_MANAGER_TOKEN: a fine-grained PAT with Contents:RW on both
+  # tap repos. The workflow's own GITHUB_TOKEN is scoped to this repo only.
+  publish-managers:
+    name: Update Homebrew tap + Scoop bucket
+    needs: [build, release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums
+
+      - name: Resolve version, channel and hashes
+        id: v
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in *-*) PRE=true ;; *) PRE=false ;; esac
+          sha() { grep -E "  $1\$" SHA256SUMS | cut -d' ' -f1; }
+          {
+            echo "version=$VERSION"
+            echo "prerelease=$PRE"
+            echo "mac=$(sha "Prateek-Term-${VERSION}-arm64.zip")"
+            echo "win_x64=$(sha "Prateek-Term-${VERSION}-x64.zip")"
+            echo "win_arm64=$(sha "Prateek-Term-${VERSION}-arm64.zip")"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_MANAGER_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::PACKAGE_MANAGER_TOKEN not set — skipping tap update."; exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/tripathiprateek/homebrew-prateek-term.git" tap
+          if [ "${{ steps.v.outputs.prerelease }}" = true ]; then CASK='prateek-term@rc'; else CASK='prateek-term'; fi
+          f="tap/Casks/${CASK}.rb"
+          [ -f "$f" ] || cp "packaging/homebrew/Casks/${CASK}.rb" "$f"
+          sed -i -E "s|^( *version )\".*\"|\1\"${{ steps.v.outputs.version }}\"|" "$f"
+          sed -i -E "s|^( *sha256 ).*|\1\"${{ steps.v.outputs.mac }}\"|"        "$f"
+          cd tap
+          git config user.name  'prateek-term-release'
+          git config user.email 'actions@github.com'
+          git add -A
+          git diff --cached --quiet || git commit -m "${CASK} ${{ steps.v.outputs.version }}"
+          git push
+
+      - name: Update Scoop manifest
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_MANAGER_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::PACKAGE_MANAGER_TOKEN not set — skipping bucket update."; exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/tripathiprateek/scoop-prateek-term.git" bucket
+          if [ "${{ steps.v.outputs.prerelease }}" = true ]; then M='prateek-term-rc'; else M='prateek-term'; fi
+          mkdir -p bucket/bucket
+          [ -f "bucket/bucket/${M}.json" ] || cp "packaging/scoop/bucket/${M}.json" "bucket/bucket/${M}.json"
+          node -e '
+            const fs = require("fs");
+            const [f, v, base, h64, harm] = process.argv.slice(1);
+            const m = JSON.parse(fs.readFileSync(f, "utf8"));
+            m.version = v;
+            m.architecture["64bit"] = { url: `${base}/Prateek-Term-${v}-x64.zip`,   hash: h64  };
+            m.architecture["arm64"] = { url: `${base}/Prateek-Term-${v}-arm64.zip`, hash: harm };
+            fs.writeFileSync(f, JSON.stringify(m, null, 4) + "\n");
+          ' "bucket/bucket/${M}.json" \
+            "${{ steps.v.outputs.version }}" \
+            "https://github.com/tripathiprateek/prateek-term/releases/download/${GITHUB_REF_NAME}" \
+            "${{ steps.v.outputs.win_x64 }}" "${{ steps.v.outputs.win_arm64 }}"
+          cd bucket
+          git config user.name  'prateek-term-release'
+          git config user.email 'actions@github.com'
+          git add -A
+          git diff --cached --quiet || git commit -m "${M} ${{ steps.v.outputs.version }}"
+          git push
