@@ -2,6 +2,7 @@
 # Prateek-Term installer for Linux.
 #
 #   curl -fsSL https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh
+#   wget -qO-  https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh
 #   curl -fsSL ... | sh -s -- --channel rc          # release candidates
 #   curl -fsSL ... | sh -s -- --version v1.5.0-rc.1 # pin an exact version
 #   curl -fsSL ... | sh -s -- --uninstall
@@ -76,15 +77,31 @@ case "$CHANNEL" in
   *) die "--channel must be 'stable' or 'rc' (got '$CHANNEL')" ;;
 esac
 
-command -v curl >/dev/null 2>&1 || die "curl is required."
+# Stock Ubuntu Desktop 24.04 ships wget but NOT curl, so support either.
+if   command -v curl >/dev/null 2>&1; then DL=curl
+elif command -v wget >/dev/null 2>&1; then DL=wget
+else die "need curl or wget."
+fi
+
+# fetch <url>            -> stdout
+# fetch <url> <outfile>  -> file, with a progress bar
+fetch() {
+  if [ "$DL" = curl ]; then
+    if [ -n "${2:-}" ]; then curl -fL --progress-bar -o "$2" "$1"
+    else curl -fsSL "$1"; fi
+  else
+    if [ -n "${2:-}" ]; then wget -q --show-progress -O "$2" "$1"
+    else wget -qO- "$1"; fi
+  fi
+}
 
 # electron-builder names AppImages with the AppImage arch convention: x86_64
 # (NOT x64, which it uses for every other target) and arm64. Verified against
 # the published v1.5.0-rc.1 assets — an earlier x64 guess 404'd on every Intel
 # and AMD machine.
 case "$(uname -m)" in
-  x86_64|amd64)  ARCH=x86_64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
+  x86_64|amd64)  ARCH=x86_64; DEB_ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64;  DEB_ARCH=arm64 ;;
   *) die "unsupported architecture: $(uname -m) (x86_64 and aarch64 are supported)" ;;
 esac
 
@@ -98,9 +115,9 @@ if [ -n "$PIN" ]; then
 elif [ "$CHANNEL" = rc ]; then
   # Releases are listed newest-first, so the first entry is the newest of
   # {stable ∪ pre-release} — which is exactly the rc channel.
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=10" | tag_from_json)
+  TAG=$(fetch "https://api.github.com/repos/$REPO/releases?per_page=10" | tag_from_json)
 else
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | tag_from_json)
+  TAG=$(fetch "https://api.github.com/repos/$REPO/releases/latest" | tag_from_json)
 fi
 [ -n "$TAG" ] || die "could not determine the latest $CHANNEL release."
 
@@ -118,10 +135,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 say "Installing Prateek-Term $VERSION ($ARCH, $CHANNEL channel)..."
-curl -fL --progress-bar -o "$TMP/$FILE" "$BASE/$FILE" \
-  || die "download failed: $BASE/$FILE"
+fetch "$BASE/$FILE" "$TMP/$FILE" || die "download failed: $BASE/$FILE"
 
-if curl -fsSL -o "$TMP/SHA256SUMS" "$BASE/SHA256SUMS" 2>/dev/null; then
+if fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" 2>/dev/null; then
   if   command -v sha256sum >/dev/null 2>&1; then SUM="sha256sum"
   elif command -v shasum    >/dev/null 2>&1; then SUM="shasum -a 256"
   else die "need sha256sum or shasum to verify the download."
@@ -134,27 +150,70 @@ else
   say "warning: SHA256SUMS not published for $TAG — skipping verification."
 fi
 
+# ── can the AppImage runtime actually start? ────────────────────────────────
+# The aarch64 runtime electron-builder bundles links against the unversioned
+# "libz.so", which only exists with zlib1g-dev installed — so on a stock
+# Debian/Ubuntu arm64 system it cannot load at all, and even --appimage-extract
+# fails. (The x86_64 runtime correctly links libz.so.1.) Verified on Ubuntu
+# 24.04.4 aarch64. Probe it, and fall back to the .deb payload when it is dead.
+chmod +x "$TMP/$FILE"
+USE_DEB=no
+if ! "$TMP/$FILE" --appimage-version >/dev/null 2>&1; then
+  if command -v dpkg-deb >/dev/null 2>&1; then
+    say "AppImage runtime unusable on this system — using the .deb payload instead."
+    USE_DEB=yes
+  else
+    die "the AppImage runtime cannot start here and dpkg-deb is unavailable.
+Install zlib1g-dev (provides libz.so) and re-run, or install the .deb manually:
+  $BASE/prateek-term_${VERSION}_${DEB_ARCH}.deb"
+  fi
+fi
+
 # ── install ─────────────────────────────────────────────────────────────────
 mkdir -p "$LIB" "$BIN" "$APPS" "$ICONS"
-install -m 0755 "$TMP/$FILE" "$APPIMAGE"
+rm -rf "$LIB/app" "$APPIMAGE"
+
+if [ "$USE_DEB" = yes ]; then
+  # dpkg-deb -x unpacks without root, so the sudo-free promise holds.
+  DEB="prateek-term_${VERSION}_${DEB_ARCH}.deb"
+  fetch "$BASE/$DEB" "$TMP/$DEB" || die "download failed: $BASE/$DEB"
+  dpkg-deb -x "$TMP/$DEB" "$LIB/app" || die "could not unpack $DEB"
+  APPBIN="$LIB/app/opt/Prateek-Term/prateek-term"
+  [ -x "$APPBIN" ] || die "unexpected .deb layout: $APPBIN missing"
+else
+  install -m 0755 "$TMP/$FILE" "$APPIMAGE"
+  APPBIN="$APPIMAGE"
+fi
+
 printf '%s\n' "$VERSION" > "$LIB/VERSION"
 printf '%s\n' "$CHANNEL" > "$LIB/CHANNEL"
+printf '%s\n' "$USE_DEB" > "$LIB/USE_DEB"
 
 # Wrapper, because Ubuntu 22.04+ ships without libfuse2 and a bare AppImage
 # then fails with a confusing mount error. This is the single most common
 # "AppImage doesn't work" report.
-cat > "$BIN/prateek-term" <<'WRAPPER'
+cat > "$BIN/prateek-term" <<WRAPPER
 #!/bin/sh
-APPIMG="$HOME/.local/lib/prateek-term/Prateek-Term.AppImage"
-if [ -e /dev/fuse ] && { command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1; }; then
-  exec "$APPIMG" "$@"
-fi
-exec "$APPIMG" --appimage-extract-and-run "$@"
+# Launches whichever payload install.sh chose. AppImage needs libfuse.so.2
+# specifically (FUSE 2): Ubuntu 22.04+ ships the fusermount binaries and
+# /dev/fuse WITHOUT it, so testing for the binary is not enough.
+APPBIN="$APPBIN"
+case "\$APPBIN" in
+  *.AppImage)
+    if [ -e /dev/fuse ] && ldconfig -p 2>/dev/null | grep -q "libfuse\\.so\\.2"; then
+      exec "\$APPBIN" "\$@"
+    fi
+    exec "\$APPBIN" --appimage-extract-and-run "\$@" ;;
+  *)
+    # Unpacked .deb: chrome-sandbox is not setuid root without dpkg's postinst,
+    # so Electron must be told not to use it.
+    exec "\$APPBIN" --no-sandbox "\$@" ;;
+esac
 WRAPPER
 chmod 0755 "$BIN/prateek-term"
 
-curl -fsSL -o "$ICONS/prateek-term.png" \
-  "https://raw.githubusercontent.com/$REPO/$TAG/build/icon.png" 2>/dev/null || true
+fetch "https://raw.githubusercontent.com/$REPO/$TAG/build/icon.png" \
+  "$ICONS/prateek-term.png" 2>/dev/null || true
 
 # Mirrors what the app writes itself (linux-integrations.js) so the launcher
 # entry exists before the user ever opens Settings. The app will later rewrite
@@ -164,7 +223,7 @@ cat > "$APPS/prateek-term.desktop" <<EOF
 Type=Application
 Name=Prateek-Term
 Comment=Terminal emulator and SSH/serial connection manager
-Exec=$APPIMAGE %u
+Exec=$BIN/prateek-term %u
 Icon=prateek-term
 Terminal=false
 Categories=Utility;TerminalEmulator;System;

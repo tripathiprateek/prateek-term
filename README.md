@@ -92,6 +92,12 @@ brew install --cask prateek-term
 curl -fsSL https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh
 ```
 
+No `curl`? Stock Ubuntu Desktop ships only `wget`:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh | sh
+```
+
 **Windows** (x64 / ARM64)
 
 ```powershell
