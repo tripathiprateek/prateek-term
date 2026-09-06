@@ -117,8 +117,15 @@ curl -fsSL .../install.sh | sh -s -- --channel rc                   # Linux
 scoop install prateek-term-rc                                       # Windows
 ```
 
-The Linux script takes `--channel stable|rc`, `--version vX.Y.Z` and
-`--uninstall`. Arguments must come after `-s --`, because the script is being
+The Linux script takes `--channel stable|rc`, `--version vX.Y.Z`, `--with-deps`
+and `--uninstall`. `--with-deps` also installs the optional CLI tools the app
+shells out to — `sshpass` (password jump hosts), `nodejs` (MCP server) and
+`cloudflared` (Cloudflare Access) — which needs `sudo`, so run it from a real
+terminal rather than through a pipe:
+
+```sh
+sh -c "$(wget -qO- https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh)" -- --with-deps
+``` Arguments must come after `-s --`, because the script is being
 piped into `sh`:
 
 ```sh

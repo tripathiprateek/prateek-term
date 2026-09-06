@@ -29,6 +29,7 @@ APPIMAGE="$LIB/Prateek-Term.AppImage"
 CHANNEL=""
 PIN=""
 ACTION=install
+WITH_DEPS=no
 
 usage() {
   cat <<EOF
@@ -37,6 +38,8 @@ Prateek-Term installer
   --channel stable|rc   Which releases to track (default: stable, or whatever
                         this machine is already on)
   --version vX.Y.Z      Install one exact version and stop tracking a channel
+  --with-deps           Also install the optional CLI tools the app shells out
+                        to (sshpass, cloudflared, node). Needs sudo.
   --uninstall           Remove Prateek-Term (settings are kept)
   -h, --help            Show this help
 EOF
@@ -47,6 +50,7 @@ while [ $# -gt 0 ]; do
     --channel)   CHANNEL="${2:-}"; shift 2 ;;
     --version)   PIN="${2:-}";     shift 2 ;;
     --uninstall) ACTION=uninstall; shift ;;
+    --with-deps) WITH_DEPS=yes;    shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -125,14 +129,98 @@ VERSION="${TAG#v}"
 FILE="Prateek-Term-${VERSION}-${ARCH}.AppImage"
 BASE="https://github.com/$REPO/releases/download/$TAG"
 
+ALREADY_INSTALLED=no
 if [ "$(cat "$LIB/VERSION" 2>/dev/null || true)" = "$VERSION" ]; then
-  say "Prateek-Term $VERSION is already installed. Nothing to do."
-  exit 0
+  say "Prateek-Term $VERSION is already installed."
+  # --with-deps must still work on an up-to-date install: someone running it
+  # after the fact expects the optional tools, not "nothing to do".
+  if [ "$WITH_DEPS" != yes ]; then
+    say "Nothing to do."
+    exit 0
+  fi
+  ALREADY_INSTALLED=yes
 fi
 
+# ── optional CLI tools ──────────────────────────────────────────────────────
+# The app shells out to these; none are required to launch, so they are opt-in.
+# sudo needs a real terminal for its prompt, and stdin here is the curl|sh pipe,
+# so every privileged command reads from /dev/tty instead.
+install_optional_deps() {
+  [ "$WITH_DEPS" = yes ] || return 0
+
+  need=""
+  command -v sshpass     >/dev/null 2>&1 || need="$need sshpass"
+  command -v node        >/dev/null 2>&1 || need="$need node"
+  command -v cloudflared >/dev/null 2>&1 || need="$need cloudflared"
+  if [ -z "$need" ]; then
+    say "Optional tools already present."
+    return 0
+  fi
+  say ""
+  say "Installing optional tools:$need"
+
+  # [ -r /dev/tty ] is NOT enough: it succeeds even with no controlling terminal
+  # (e.g. a non-interactive ssh session), and the open then fails noisily. Try
+  # the open itself.
+  # Must be a SUBSHELL with the redirect inside: `: </dev/tty 2>/dev/null` still
+  # prints dash's "cannot open /dev/tty", because dash applies the redirects in
+  # order and the input one fails before stderr is silenced.
+  if ! (exec 3</dev/tty) 2>/dev/null; then
+    say "  no terminal available for the sudo prompt — skipping."
+    say "  Run these yourself:"
+    say "    sudo apt install -y sshpass nodejs"
+    say "    # cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    return 0
+  fi
+
+  # SC2024: the redirect is opened by THIS shell (as the invoking user) before
+  # sudo runs, which is exactly what we want — /dev/tty is ours, not root's.
+  if command -v apt-get >/dev/null 2>&1; then
+    pkgs=""
+    case "$need" in *sshpass*) pkgs="$pkgs sshpass" ;; esac
+    case "$need" in *node*)    pkgs="$pkgs nodejs"  ;; esac
+    if [ -n "$pkgs" ]; then
+      # shellcheck disable=SC2024,SC2086
+      if sudo apt-get update -qq </dev/tty && sudo apt-get install -y $pkgs </dev/tty; then
+        say "  installed:$pkgs"
+      else
+        say "  apt install failed — carrying on."
+      fi
+    fi
+    case "$need" in
+      *cloudflared*)
+        # Not in Ubuntu's repos; Cloudflare publish per-arch .debs.
+        if [ "$DEB_ARCH" = arm64 ]; then CF_ARCH=arm64; else CF_ARCH=amd64; fi
+        CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb"
+        if fetch "$CF_URL" "$TMP/cloudflared.deb" 2>/dev/null; then
+          # shellcheck disable=SC2024
+          if sudo dpkg -i "$TMP/cloudflared.deb" </dev/tty >/dev/null 2>&1; then
+            say "  cloudflared installed."
+          else
+            say "  cloudflared install failed."
+          fi
+        else
+          say "  could not download cloudflared."
+        fi ;;
+    esac
+  elif command -v dnf >/dev/null 2>&1; then
+    # shellcheck disable=SC2024
+    sudo dnf install -y sshpass nodejs </dev/tty || say "  dnf install failed."
+  elif command -v pacman >/dev/null 2>&1; then
+    # shellcheck disable=SC2024
+    sudo pacman -S --noconfirm sshpass nodejs </dev/tty || say "  pacman install failed."
+  else
+    say "  unknown package manager — install manually:$need"
+  fi
+}
 # ── download + verify ───────────────────────────────────────────────────────
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
+
+if [ "$ALREADY_INSTALLED" = yes ]; then
+  install_optional_deps
+  exit 0
+fi
 
 say "Installing Prateek-Term $VERSION ($ARCH, $CHANNEL channel)..."
 fetch "$BASE/$FILE" "$TMP/$FILE" || die "download failed: $BASE/$FILE"
@@ -234,6 +322,8 @@ chmod 0644 "$APPS/prateek-term.desktop"
 
 update-desktop-database "$APPS" 2>/dev/null || true
 gtk-update-icon-cache -f -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" 2>/dev/null || true
+
+install_optional_deps
 
 say ""
 say "Prateek-Term $VERSION installed."
