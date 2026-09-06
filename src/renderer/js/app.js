@@ -4461,11 +4461,11 @@ async function setupDependencyBanner() {
   // Normalise everything into one list of {name, why, fix, critical} rows.
   const rows = [
     ...missing.map((d) => ({
-      name: d.key, critical: !!d.required, fix: d.install,
+      name: d.key, critical: !!d.required, fix: d.install, cmd: d.installCmd || null,
       why: `Not installed — ${d.purpose}`,
     })),
     ...outdated.map((d) => ({
-      name: d.key, critical: false, fix: d.install,
+      name: d.key, critical: false, fix: d.install, cmd: d.installCmd || null,
       why: `Version ${d.version} is too old (needs ${d.minVersion}+) — ${d.purpose}. `
          + 'Outdated versions can fail or hang instead of erroring clearly.',
     })),
@@ -4482,12 +4482,37 @@ async function setupDependencyBanner() {
     ? `Environment problem: ${names} — connections may fail until this is fixed`
     : `Check your setup: ${names} — some features may not work`;
 
-  dom.depsDetails.innerHTML = rows.map((r) => `
+  dom.depsDetails.innerHTML = rows.map((r, i) => `
     <div class="dep-row">
       <span class="dep-name${r.critical ? ' req' : ''}">${escapeHtml(r.name)}</span>
       <span class="dep-purpose">${escapeHtml(r.why)}</span>
-      <code class="dep-install">${escapeHtml(r.fix)}</code>
+      <code class="dep-install">${escapeHtml(r.cmd || r.fix)}</code>
+      ${r.cmd ? `<button class="dep-install-btn" data-row="${i}">Install</button>` : ''}
     </div>`).join('');
+
+  // Prateek-Term is a terminal, so the honest way to run a privileged install is
+  // to open a local tab with the command typed in and let the user press Enter:
+  // they see exactly what runs, and sudo gets a real tty for its prompt. No
+  // elevation plumbing, and nothing executes without a deliberate keypress.
+  dom.depsDetails.querySelectorAll('.dep-install-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = rows[Number(btn.dataset.row)];
+      if (!row || !row.cmd) return;
+      btn.disabled = true;
+      btn.textContent = 'Opening…';
+      try {
+        const tab = await createTab({ connectionProfile: { protocol: 'local', name: `Install ${row.name}` } });
+        // Give the shell a moment to draw its first prompt, then type the
+        // command WITHOUT a newline.
+        setTimeout(() => {
+          if (tab && tab.ptyId) window.terminalAPI.sendInput(tab.ptyId, row.cmd);
+        }, 600);
+      } finally {
+        btn.textContent = 'Install';
+        btn.disabled = false;
+      }
+    });
+  });
 
   dom.depsDetailsBtn.addEventListener('click', () => {
     dom.depsDetails.classList.toggle('hidden');

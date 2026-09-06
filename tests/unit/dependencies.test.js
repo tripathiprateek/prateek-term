@@ -107,3 +107,66 @@ describe('startup dependency-check wiring', () => {
     expect(read('src/renderer/index.html')).toContain('id="deps-banner"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Runnable install commands + the banner's Install button
+// ---------------------------------------------------------------------------
+describe('installCommand', () => {
+  const { packageManager, installCommand } = require('../../src/main/dependencies');
+
+  test('maps each tool to its package manager', () => {
+    expect(installCommand('sshpass', 'apt')).toBe('sudo apt install -y sshpass');
+    expect(installCommand('sshpass', 'brew')).toContain('hudochenkov/sshpass');
+    expect(installCommand('node', 'winget')).toContain('OpenJS.NodeJS');
+    expect(installCommand('telnet', 'pacman')).toContain('inetutils');
+  });
+
+  test('cloudflared is not in distro repos — apt/dnf fetch it from Cloudflare', () => {
+    expect(installCommand('cloudflared', 'apt')).toContain('cloudflare/cloudflared/releases');
+    expect(installCommand('cloudflared', 'dnf')).toContain('cloudflare/cloudflared/releases');
+    expect(installCommand('cloudflared', 'brew')).toBe('brew install cloudflared');
+  });
+
+  test('no package manager, or no one-liner for that tool → null', () => {
+    expect(installCommand('sshpass', null)).toBeNull();
+    expect(installCommand('sshpass', 'winget')).toBeNull();   // not available on Windows
+    expect(installCommand('nonsense', 'apt')).toBeNull();
+  });
+
+  test('packageManager detects from the injected probe', () => {
+    const only = (want) => (bin) => (bin.startsWith(want) ? `/usr/bin/${bin}` : null);
+    if (process.platform === 'linux') {
+      expect(packageManager(only('apt-get'))).toBe('apt');
+      expect(packageManager(() => null)).toBeNull();
+    } else {
+      expect(['brew', 'winget', null]).toContain(packageManager(() => null));
+    }
+  });
+
+  test('checkDependencies exposes installCmd on every row', () => {
+    const { checkDependencies } = require('../../src/main/dependencies');
+    const report = checkDependencies(() => null, () => '');
+    expect(report.length).toBeGreaterThan(0);
+    for (const r of report) expect(r).toHaveProperty('installCmd');
+  });
+});
+
+describe('banner Install button', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/renderer/js/app.js'), 'utf8');
+
+  test('renders a button only when a runnable command exists', () => {
+    expect(app).toContain('dep-install-btn');
+    expect(app).toMatch(/r\.cmd \?/);
+  });
+
+  test('opens a local tab and types the command WITHOUT executing it', () => {
+    const fn = app.match(/dep-install-btn'\)\.forEach[\s\S]{0,900}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toContain("protocol: 'local'");
+    expect(fn[0]).toContain('sendInput(tab.ptyId, row.cmd)');
+    // No trailing newline/carriage return — the user must press Enter.
+    expect(fn[0]).not.toMatch(/row\.cmd \+ ['"`]\\[rn]/);
+  });
+});

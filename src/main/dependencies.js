@@ -86,6 +86,66 @@ function dependencySpec() {
 }
 
 /**
+ * Which package manager this machine actually has. The install command a user
+ * can run differs per distro, so it is resolved at runtime rather than guessed
+ * in the catalogue.
+ * @returns {'brew'|'apt'|'dnf'|'pacman'|'winget'|null}
+ */
+function packageManager(probe = platform.whichBin) {
+  const has = (bin, candidates) => {
+    try { return !!probe(bin, candidates || []); } catch { return false; }
+  };
+  if (platform.isWindows()) return has('winget.exe', []) ? 'winget' : null;
+  if (platform.isMac())     return has('brew', ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']) ? 'brew' : null;
+  if (has('apt-get', ['/usr/bin/apt-get'])) return 'apt';
+  if (has('dnf',     ['/usr/bin/dnf']))     return 'dnf';
+  if (has('pacman',  ['/usr/bin/pacman']))  return 'pacman';
+  return null;
+}
+
+// A command the user can actually run, per tool per package manager. Anything
+// absent here has no one-liner (e.g. sshpass on Windows) and falls back to the
+// prose hint. cloudflared is deliberately missing from apt/dnf/pacman: it is
+// not in distro repos, so it gets a dedicated download command below.
+const INSTALL_COMMANDS = {
+  sshpass: {
+    brew:   'brew install hudochenkov/sshpass/sshpass',
+    apt:    'sudo apt install -y sshpass',
+    dnf:    'sudo dnf install -y sshpass',
+    pacman: 'sudo pacman -S --noconfirm sshpass',
+  },
+  node: {
+    brew:   'brew install node',
+    apt:    'sudo apt install -y nodejs',
+    dnf:    'sudo dnf install -y nodejs',
+    pacman: 'sudo pacman -S --noconfirm nodejs',
+    winget: 'winget install --id OpenJS.NodeJS',
+  },
+  telnet: {
+    brew:   'brew install telnet',
+    apt:    'sudo apt install -y telnet',
+    dnf:    'sudo dnf install -y telnet',
+    pacman: 'sudo pacman -S --noconfirm inetutils',
+  },
+  cloudflared: {
+    brew:   'brew install cloudflared',
+    winget: 'winget install --id Cloudflare.cloudflared',
+    // Not packaged by any distro — fetch Cloudflare's own .deb/.rpm.
+    apt: 'curl -fsSL -o /tmp/cloudflared.deb '
+       + 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(dpkg --print-architecture).deb '
+       + '&& sudo dpkg -i /tmp/cloudflared.deb',
+    dnf: 'sudo dnf install -y '
+       + 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$(uname -m).rpm',
+  },
+};
+
+/** The runnable install command for a tool, or null when there is no one-liner. */
+function installCommand(key, pm) {
+  if (!pm) return null;
+  return (INSTALL_COMMANDS[key] && INSTALL_COMMANDS[key][pm]) || null;
+}
+
+/**
  * Compare dotted numeric versions. Returns <0, 0 or >0 like a sort comparator.
  * Handles CalVer (2026.7.3) and SemVer (1.09, 18.0.0) alike.
  */
@@ -117,6 +177,7 @@ function defaultRunVersion(binPath, args) {
  *          versionState: 'ok' | 'outdated' | 'unknown' | null (no version rule)
  */
 function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVersion) {
+  const pm = packageManager(probe);
   return dependencySpec().map((d) => {
     let found = null;
     try { found = probe(d.bin, d.candidates || []); } catch { found = null; }
@@ -137,9 +198,12 @@ function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVer
     return {
       key: d.key, bin: d.bin, required: d.required, purpose: d.purpose,
       install: d.install, found: !!found, path: found || null,
+      installCmd: installCommand(d.key, pm),
       version, minVersion: d.minVersion || null, versionState,
     };
   });
 }
 
-module.exports = { dependencySpec, checkDependencies, compareVersions };
+module.exports = {
+  dependencySpec, checkDependencies, compareVersions, packageManager, installCommand,
+};
