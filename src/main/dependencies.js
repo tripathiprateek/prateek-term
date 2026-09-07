@@ -27,7 +27,11 @@ function dependencySpec() {
   const mac = platform.isMac();
   const exe = (n) => (win ? `${n}.exe` : n);
 
-  return [
+  // Anything that cannot exist on this OS must be ABSENT from the catalogue,
+  // not listed as missing: a row saying "Not installed" next to a hint saying
+  // "Not available on Windows" is a false problem, and false problems train
+  // people to ignore the banner.
+  const spec = [
     {
       key: 'ssh', bin: exe('ssh'), required: true,
       purpose: 'SSH, SFTP and SCP connections (the core of the app)',
@@ -46,11 +50,9 @@ function dependencySpec() {
       // "1.06 hangs" theory turned out to be a wedged ssh-agent, not sshpass —
       // see health-checks.js. Don't warn about a tool that demonstrably works.
       versionArgs: ['-V'], versionRe: /sshpass\s+(\d+\.\d+)/i,
-      install: win
-        ? 'Not available on Windows — use key-based auth instead.'
-        : mac
-          ? 'brew install hudochenkov/sshpass/sshpass'
-          : 'Debian/Ubuntu: sudo apt install sshpass',
+      install: mac
+        ? 'brew install hudochenkov/sshpass/sshpass'
+        : 'Debian/Ubuntu: sudo apt install sshpass',
     },
     {
       key: 'cloudflared', bin: exe('cloudflared'), required: false,
@@ -83,6 +85,11 @@ function dependencySpec() {
           : 'Debian/Ubuntu: sudo apt install telnet',
     },
   ];
+
+  // sshpass is POSIX-only: there is no Windows port, and ssh-utils only looks
+  // for it in Unix paths. On Windows, password-authenticated jump hosts are
+  // simply unsupported — use a key instead.
+  return win ? spec.filter((d) => d.key !== 'sshpass') : spec;
 }
 
 /**

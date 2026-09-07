@@ -23,6 +23,32 @@ describe('dependencySpec', () => {
     expect(keys).toEqual(expect.arrayContaining(['ssh', 'sshpass', 'cloudflared', 'node', 'telnet']));
   });
 
+  test('nothing uninstallable on this OS is listed', () => {
+    // The Windows banner showed "sshpass — Not installed" right next to the
+    // hint "Not available on Windows", i.e. a problem the user cannot fix.
+    // A tool absent from a platform must be absent from its catalogue.
+    for (const d of dependencySpec()) {
+      expect(d.install).not.toMatch(/not available on/i);
+    }
+  });
+
+  test('sshpass is POSIX-only — never offered on Windows', () => {
+    const platform = require('../../src/main/platform');
+    const realWin = platform.isWindows;
+    const realMac = platform.isMac;
+    try {
+      platform.isWindows = () => true;
+      platform.isMac = () => false;
+      const keys = dependencySpec().map((d) => d.key);
+      expect(keys).not.toContain('sshpass');
+      // …but the ones Windows CAN install are still offered.
+      expect(keys).toEqual(expect.arrayContaining(['ssh', 'cloudflared', 'node', 'telnet']));
+    } finally {
+      platform.isWindows = realWin;
+      platform.isMac = realMac;
+    }
+  });
+
   test('every entry has a purpose and an install hint', () => {
     for (const d of dependencySpec()) {
       expect(typeof d.purpose).toBe('string');
