@@ -92,11 +92,14 @@ describe('the exact filenames the installers build URLs from', () => {
     const ps = fs.readFileSync(path.join(__dirname, '../../install.ps1'), 'utf8');
     // Without -UseBasicParsing, PS 5.1 routes parsing through the IE engine and
     // throws NullReferenceException until IE's first-run wizard is done.
-    const calls = ps.match(/Invoke-(WebRequest|RestMethod)[^\n]*/g) || [];
+    // Strip comment lines first — the file explains these traps in prose, and
+    // matching that text is not the same as matching a real invocation.
+    const code = ps.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    const calls = code.match(/Invoke-(WebRequest|RestMethod)[^\n]*/g) || [];
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(c).toContain('-UseBasicParsing');
     // \Q...\E is PCRE; .NET throws "Unrecognized escape sequence \Q".
-    expect(ps).not.toMatch(/-match[^\n]*\\Q/);
+    expect(code).not.toMatch(/-match[^\n]*\\Q/);
   });
 
   test('install.sh asks for the arch names electron-builder actually emits', () => {
