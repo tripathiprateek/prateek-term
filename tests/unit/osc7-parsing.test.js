@@ -162,9 +162,11 @@ describe('app.js — OSC 7 injection helper is reusable for reconnect', () => {
     expect(appSource).toMatch(/maybeFireOscInjection\(tab,\s*data\)/);
   });
 
-  test('injection skips while password auto-type is still pending', () => {
-    // Prevents the injection from being typed INTO the password prompt.
-    expect(appSource).toMatch(/if \(tab\._pendingPassword\) return/);
+  test('injection skips while any password is still unanswered', () => {
+    // Prevents the injection from being typed INTO a password prompt. A
+    // jump-host connection has two prompts, so this is a queue now, not a
+    // single pending password.
+    expect(appSource).toMatch(/if \(tab\._pwdQueue && tab\._pwdQueue\.length\) return/);
   });
 
   test('injection fires only when shell prompt is detected (not password prompt)', () => {

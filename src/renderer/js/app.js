@@ -780,6 +780,36 @@ async function ensureCloudflareToken(profile) {
   return true;
 }
 
+/**
+ * The passwords this connection will be asked for, in the order ssh asks.
+ *
+ * A jump-host connection produces TWO prompts:
+ *   pi@192.168.1.68's password:      <- the jump host
+ *   root@192.168.2.140's password:   <- the target
+ * The old auto-type held a single password and fired on the first thing
+ * matching /password/i, so on a jump connection it typed the TARGET password
+ * into the JUMP prompt — wrong secret, wrong host — and then had nothing left
+ * for the target. ssh prints "user@host's password:", so each entry carries
+ * the user@host it belongs to and only answers its own prompt.
+ *
+ * On macOS/Linux sshpass answers the jump prompt before it is ever displayed,
+ * so that entry simply never matches. On Windows there is no sshpass, which is
+ * why the jump prompt appears at all — and why queueing it makes password jump
+ * hosts work there without sshpass.
+ */
+function buildPasswordQueue(cp) {
+  if (!cp || cp.protocol !== 'ssh') return [];
+  const who = (user, host) => (user ? `${user}@${host}` : String(host || ''));
+  const q = [];
+  if (cp.proxyEnabled && cp.proxyPassword && cp.proxyHost) {
+    q.push({ who: who(cp.proxyUsername, cp.proxyHost), password: cp.proxyPassword });
+  }
+  if (cp.authType === 'password' && cp.password && cp.host) {
+    q.push({ who: who(cp.username, cp.host), password: cp.password });
+  }
+  return q;
+}
+
 async function createTab(options = {}) {
   // Preflight Cloudflare Access before building any tab UI.
   const _cfp = options.connectionProfile;
@@ -1020,10 +1050,8 @@ async function createTab(options = {}) {
     // Arm auto-type for SSH connections with a saved password.
     // Cleared in onTerminalData after first use so it fires exactly once.
     const cp = options.connectionProfile;
-    if (cp && cp.password && cp.protocol === 'ssh' && cp.authType === 'password') {
-      tab._pendingPassword = cp.password;
-      tab._pwdBuf = '';
-    }
+    tab._pwdQueue = buildPasswordQueue(cp);
+    tab._pwdBuf = '';
     // Cloudflare Access tab: capture a rolling output tail so a failed connect
     // can be translated into an actionable hint on exit.
     if (cp && cp.protocol === 'ssh' && cp.cloudflareAccess) tab._cfHost = cp.host;
@@ -2066,7 +2094,7 @@ function maybeFireOscInjection(tab, data) {
   }
   if (tab._oscInjected) return;
   // Password auto-type still pending → keep waiting, we're not at shell yet
-  if (tab._pendingPassword) return;
+  if (tab._pwdQueue && tab._pwdQueue.length) return;   // still authenticating
   if (tab._oscWatchBuf === undefined) return; // injection not armed yet
 
   tab._oscWatchBuf = (tab._oscWatchBuf + data).slice(-512);
@@ -2678,12 +2706,8 @@ async function reconnectTab(tab) {
       const result = await window.terminalAPI.createTerminal(ptyOptions);
       tab.ptyId = result.id;
       // Re-arm auto-type on reconnect
-      if (tab.connectionProfile?.password &&
-          tab.connectionProfile?.protocol === 'ssh' &&
-          tab.connectionProfile?.authType === 'password') {
-        tab._pendingPassword = tab.connectionProfile.password;
-        tab._pwdBuf = '';
-      }
+      tab._pwdQueue = buildPasswordQueue(tab.connectionProfile);
+      tab._pwdBuf = '';
       // Reset cwd-restore guard so reconnect can re-run it if needed
       tab._cwdRestoreFired = false;
       if (shellCommand && result.debugCmd) {
@@ -2772,16 +2796,22 @@ function setupTerminalListeners() {
     if (tab) {
       // Auto-type SSH password when server prompts for it.
       // Uses a rolling 256-char buffer so "password" split across two PTY
-      // data chunks is still detected. Clears _pendingPassword immediately
+      // data chunks is still detected. Removes the entry immediately
       // so the password is sent exactly once per connection.
-      if (tab._pendingPassword) {
+      if (tab._pwdQueue && tab._pwdQueue.length) {
         tab._pwdBuf = ((tab._pwdBuf || '') + data).slice(-256);
         if (/password/i.test(tab._pwdBuf)) {
-          const pwd = tab._pendingPassword;
-          tab._pendingPassword = null;
-          tab._pwdBuf = '';
-          // 300 ms: enough time for SSH to put the PTY in no-echo mode
-          setTimeout(() => window.terminalAPI.sendInput(id, pwd + '\r'), 300);
+          // Answer the prompt that names THIS host. Falling back to the only
+          // remaining entry keeps single-hop connections working even if the
+          // server words its prompt differently.
+          let i = tab._pwdQueue.findIndex((e) => e.who && tab._pwdBuf.includes(e.who));
+          if (i === -1 && tab._pwdQueue.length === 1) i = 0;
+          if (i !== -1) {
+            const entry = tab._pwdQueue.splice(i, 1)[0];
+            tab._pwdBuf = '';
+            // 300 ms: enough time for SSH to put the PTY in no-echo mode
+            setTimeout(() => window.terminalAPI.sendInput(id, entry.password + '\r'), 300);
+          }
         }
       }
 
