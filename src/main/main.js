@@ -42,6 +42,7 @@ const {
   buildIncludePacUrl,
   cloudflareTokenStatus,
   cloudflareErrorHint,
+  sshErrorHint,
 } = require('./ssh-utils');
 
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
@@ -1389,6 +1390,7 @@ ipcMain.handle('cloudflared:token-status', (_event, hostname) => {
 });
 
 // Translate raw SSH/cloudflared failure output into an actionable hint, or null.
+ipcMain.handle('ssh:error-hint',        (_, text) => sshErrorHint(text));
 ipcMain.handle('cloudflared:error-hint', (_event, text) => {
   return cloudflareErrorHint(text);
 });

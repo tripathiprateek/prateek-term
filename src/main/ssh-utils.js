@@ -228,15 +228,30 @@ function buildJumpHostProxyCommand(profile) {
     // socket (common on macOS: the socket outlives the process) makes ssh block
     // forever, so the tunnel never relays the target's banner and the outer
     // connection dies with "timed out during banner exchange".
-    const sshpassPath = findSshpass() || 'sshpass';
-    innerParts = [
-      sshpassPath, '-p', profile.proxyPassword,
-      'ssh',
+    const forcePassword = [
       '-o', 'PreferredAuthentications=password',
       '-o', 'PubkeyAuthentication=no',
       '-o', 'IdentityAgent=none',
-      ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
     ];
+    const sshpassPath = findSshpass();
+    if (sshpassPath) {
+      innerParts = [
+        sshpassPath, '-p', profile.proxyPassword,
+        'ssh', ...forcePassword, ...strictOpts, ...jPort, '-W', '%h:%p', jUser,
+      ];
+    } else {
+      // No sshpass on this machine — ALWAYS the case on Windows, where no port
+      // of it exists and SSHPASS_CANDIDATES only lists Unix paths. This used to
+      // fall back to the literal string 'sshpass', which ssh then tried to
+      // exec: "CreateProcessW failed error:2" / "posix_spawnp: No such file or
+      // directory", with nothing pointing at the real cause.
+      //
+      // Plain ssh -W instead: it prompts for the jump-host password on the
+      // console (ssh reads passwords from the tty, not from stdin, and stdin
+      // here is the tunnel), so the connection is merely interactive rather
+      // than broken. The saved password cannot be injected without sshpass.
+      innerParts = ['ssh', ...forcePassword, ...strictOpts, ...jPort, '-W', '%h:%p', jUser];
+    }
   } else {
     innerParts = ['ssh', ...strictOpts, ...jPort, '-W', '%h:%p', jUser];
   }
@@ -654,10 +669,35 @@ function cloudflareErrorHint(text) {
   return null;
 }
 
+/**
+ * Translate a raw SSH failure into something the user can act on.
+ * Returns null when the text is not a case we recognise.
+ */
+function sshErrorHint(text) {
+  const s = String(text || '');
+  // ssh could not exec its ProxyCommand. On Windows this was our own bug (the
+  // jump-host command named `sshpass`, which has no Windows port), but a
+  // hand-written ProxyCommand can do it too.
+  if (/CreateProcessW failed|posix_spawnp|exec request failed/i.test(s)) {
+    return 'The jump-host command could not be started — a program it needs is missing. '
+         + 'On Windows there is no sshpass, so a jump host cannot use a saved password: '
+         + 'set the jump host to Key File auth, or update Prateek-Term.';
+  }
+  if (/timed out during banner exchange|Connection timed out during banner/i.test(s)) {
+    return 'The jump host connected but relayed nothing. Usually a wedged ssh-agent '
+         + '(SSH_AUTH_SOCK set with no live agent) or an unreachable target behind the jump.';
+  }
+  if (/Permission denied \(publickey/i.test(s)) {
+    return 'The server rejected your key. Check the profile\'s key file, or switch to password auth.';
+  }
+  return null;
+}
+
 module.exports = {
   writeAskpassScript,
   cloudflareTokenStatus,
   cloudflareErrorHint,
+  sshErrorHint,
   decodeJwtExp,
   wrapWithAskpass,
   findSshpass,

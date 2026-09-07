@@ -2721,6 +2721,12 @@ function showExitMessage(tab, exitCode) {
     Promise.resolve(window.terminalAPI.cloudflaredErrorHint(tail))
       .then((hint) => { if (hint) tab.term.write(`\r\n\x1b[33m⚠ ${hint}\x1b[0m\r\n`); })
       .catch(() => {});
+  } else if (exitCode !== 0 && tab._cfTail) {
+    // Any other failed SSH tab: translate the raw ssh error too. A bare
+    // "CreateProcessW failed error:2" tells the user nothing about the cause.
+    Promise.resolve(window.terminalAPI.sshErrorHint(tab._cfTail))
+      .then((hint) => { if (hint) tab.term.write(`\r\n\x1b[33m⚠ ${hint}\x1b[0m\r\n`); })
+      .catch(() => {});
   }
 
   if (canReconnect) {
@@ -2785,9 +2791,11 @@ function setupTerminalListeners() {
       maybeFireOscInjection(tab, data);
 
       tab.term.write(data);
-      // Rolling tail for Cloudflare Access tabs → used to translate a failed
-      // connect into an actionable hint when the process exits.
-      if (tab._cfHost) tab._cfTail = ((tab._cfTail || '') + data).slice(-4000);
+      // Rolling tail for every SSH tab → used to translate a failed connect
+      // into an actionable hint when the process exits. Previously kept only
+      // for Cloudflare tabs, so a plain SSH failure had no text to diagnose
+      // and the user just saw the raw ssh error.
+      if (tab.protocol === 'ssh') tab._cfTail = ((tab._cfTail || '') + data).slice(-4000);
       if (tab.logId) window.terminalAPI.logWrite(tab.logId, data);
     } else {
       // Process started before the tab was registered — buffer until flush

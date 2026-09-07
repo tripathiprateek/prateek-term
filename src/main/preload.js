@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('terminalAPI', {
     ipcRenderer.invoke('cloudflared:login', { hostname, cloudflaredPath: cloudflaredPath || null }),
 
   // Cloudflare Access — translate raw failure output into a hint (or null).
+  sshErrorHint:  (text) => ipcRenderer.invoke('ssh:error-hint', text),
   cloudflaredErrorHint: (text) =>
     ipcRenderer.invoke('cloudflared:error-hint', text),
 

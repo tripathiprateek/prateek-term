@@ -218,3 +218,100 @@ describe('buildSSHCommand — Cloudflare vs Jump Host mutual exclusion', () => {
     expect(entries).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The ProxyCommand must never name a binary that is not there
+// ---------------------------------------------------------------------------
+describe('password jump host without sshpass (i.e. every Windows machine)', () => {
+  const path = require('path');
+  const pw = {
+    proxyEnabled: true, proxyHost: '10.0.0.1',
+    proxyUsername: 'pi', proxyPassword: 'secret',
+  };
+
+  test('never emits a bare "sshpass" token', () => {
+    // It used to do `findSshpass() || 'sshpass'`, so on Windows — where no port
+    // of sshpass exists and SSHPASS_CANDIDATES lists only Unix paths — ssh was
+    // handed a command it could not exec:
+    //   CreateProcessW failed error:2 / posix_spawnp: No such file or directory
+    const cmd = buildJumpHostProxyCommand(pw)[1];
+    expect(cmd).not.toMatch(/ProxyCommand=sshpass\b/);
+
+    const first = cmd.match(/ProxyCommand=(\S+)/)[1];
+    if (first.includes('sshpass')) {
+      // Referencing sshpass at all is only legitimate as a verified full path.
+      expect(path.isAbsolute(first)).toBe(true);
+    } else {
+      expect(first).toMatch(/(^|[/\\])ssh(\.exe)?$/);
+    }
+  });
+
+  test('still forces password-only auth on either path', () => {
+    // Without this the inner ssh tries publickey first and a wedged agent
+    // socket hangs the tunnel — the original NTC-502/G526 failure.
+    const cmd = buildJumpHostProxyCommand(pw)[1];
+    expect(cmd).toContain('PreferredAuthentications=password');
+    expect(cmd).toContain('PubkeyAuthentication=no');
+    expect(cmd).toContain('IdentityAgent=none');
+  });
+
+  test('the password is only ever passed via sshpass, never to ssh directly', () => {
+    const cmd = buildJumpHostProxyCommand(pw)[1];
+    if (!cmd.includes('sshpass')) {
+      // Fallback path: ssh prompts interactively; the secret must not appear.
+      expect(cmd).not.toContain('secret');
+    }
+  });
+
+  test('key-based jump hosts are unaffected', () => {
+    const cmd = buildJumpHostProxyCommand({
+      proxyEnabled: true, proxyHost: '10.0.0.1', proxyUsername: 'pi',
+      proxyPemFile: '/keys/id_rsa',
+    })[1];
+    expect(cmd).toContain('-i /keys/id_rsa');
+    expect(cmd).not.toContain('sshpass');
+  });
+});
+
+describe('sshErrorHint — turning raw ssh noise into something actionable', () => {
+  const { sshErrorHint } = require('../../src/main/ssh-utils');
+
+  test('explains the exact Windows proxy failure', () => {
+    const hint = sshErrorHint('CreateProcessW failed error:2\nposix_spawnp: No such file or directory');
+    expect(hint).toMatch(/jump-host command could not be started/i);
+    expect(hint).toMatch(/Key File/i);       // tells them what to do instead
+  });
+
+  test('explains a banner-exchange timeout', () => {
+    expect(sshErrorHint('Connection timed out during banner exchange')).toMatch(/ssh-agent|unreachable/i);
+  });
+
+  test('unrecognised text → null, so nothing is invented', () => {
+    expect(sshErrorHint('some unrelated output')).toBeNull();
+    expect(sshErrorHint('')).toBeNull();
+    expect(sshErrorHint(null)).toBeNull();
+  });
+});
+
+describe('the hint is actually reachable from the UI', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const read = (p) => fs.readFileSync(path.join(__dirname, '../../', p), 'utf8');
+
+  test('main and preload expose it', () => {
+    expect(read('src/main/main.js')).toContain("ipcMain.handle('ssh:error-hint'");
+    expect(read('src/main/preload.js')).toContain('sshErrorHint');
+  });
+
+  test('every SSH tab keeps the output tail, not just Cloudflare ones', () => {
+    // Without this the hint had no text to work from on a plain SSH failure.
+    const app = read('src/renderer/js/app.js');
+    expect(app).toContain("if (tab.protocol === 'ssh') tab._cfTail");
+  });
+
+  test('showExitMessage falls through to the ssh hint', () => {
+    const app = read('src/renderer/js/app.js');
+    const fn = app.match(/function showExitMessage\(tab, exitCode\)[\s\S]{0,900}/);
+    expect(fn[0]).toContain('sshErrorHint');
+  });
+});
