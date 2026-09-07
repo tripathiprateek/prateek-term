@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Prateek-Term installer for Windows.
 
@@ -59,18 +59,31 @@ $Arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 $headers = @{ 'User-Agent' = 'prateek-term-installer'; Accept = 'application/vnd.github.v3+json' }
 if ($Version) {
   $tag = $Version
-} elseif ($Channel -eq 'rc') {
-  # Newest of {stable + pre-release} — the releases list is newest-first.
-  $tag = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases?per_page=10" -Headers $headers |
-          Where-Object { -not $_.draft } | Select-Object -First 1).tag_name
 } else {
-  # /releases/latest excludes pre-releases by definition.
-  $tag = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers).tag_name
+  # Pull the tag straight out of the JSON text with a regex, the same way
+  # install.sh does with grep. PowerShell 5.1 hands a JSON array back as a
+  # single container whose properties are arrays, so `Where-Object { -not
+  # $_.draft }` evaluates `-not @(False,False,...)` -> $false and filters
+  # everything out. Both Invoke-RestMethod and ConvertFrom-Json behave this way,
+  # so avoid collection semantics entirely.
+  # Unauthenticated list requests never include drafts, so no draft filter is
+  # needed; the list is newest-first, so the first tag is the newest.
+  $url = if ($Channel -eq 'rc') {
+    "https://api.github.com/repos/$Repo/releases?per_page=10"
+  } else {
+    # /releases/latest excludes pre-releases by definition.
+    "https://api.github.com/repos/$Repo/releases/latest"
+  }
+  $json = (Invoke-WebRequest $url -Headers $headers -UseBasicParsing).Content
+  $tag  = [regex]::Match($json, '"tag_name"\s*:\s*"(v[^"]+)"').Groups[1].Value
 }
+
 if (-not $tag) { throw "Could not determine the latest $Channel release." }
 
 $ver  = $tag -replace '^v', ''
-$file = "Prateek-Term-$ver-$Arch.zip"
+# -win- is part of the name: mac and win both rendered "...-<arch>.zip" until
+# v1.5.0-rc.2 split them, so this must match the CURRENT asset or it 404s.
+$file = "Prateek-Term-$ver-win-$Arch.zip"
 $base = "https://github.com/$Repo/releases/download/$tag"
 
 if (Test-Path $StateFile) {
@@ -87,18 +100,31 @@ New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 try {
   Write-Step "Installing Prateek-Term $ver ($Arch, $Channel channel)..."
   $zip = Join-Path $tmp $file
-  Invoke-WebRequest "$base/$file" -OutFile $zip -Headers $headers
+  Invoke-WebRequest "$base/$file" -OutFile $zip -Headers $headers -UseBasicParsing
 
   try {
-    $sums = (Invoke-WebRequest "$base/SHA256SUMS" -Headers $headers).Content
+    # .Content is a Byte[] here, not a String: GitHub serves SHA256SUMS as
+    # application/octet-stream and -UseBasicParsing returns raw bytes for any
+    # non-text content type. Splitting bytes on "`n" yields one entry PER BYTE,
+    # so the hash was never found and verification silently did nothing.
+    $raw  = (Invoke-WebRequest "$base/SHA256SUMS" -Headers $headers -UseBasicParsing).Content
+    $sums = if ($raw -is [byte[]]) { [Text.Encoding]::UTF8.GetString($raw) } else { [string]$raw }
     # SHA256SUMS carries bare filenames, two spaces before the name.
-    $want = ($sums -split "`n" | Where-Object { $_ -match "\s\Q$file\E$" }) -split '\s+' | Select-Object -First 1
+    # Trim each line: SHA256SUMS may arrive with CRLF, and a trailing \r would
+    # defeat an anchored match. [regex]::Escape, not \Q...\E, which .NET rejects.
+    $want = $sums -split "`n" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object   { $_ -match ("\s" + [regex]::Escape($file) + "$") } |
+            ForEach-Object { ($_ -split '\s+')[0] } |
+            Select-Object -First 1
     if ($want) {
       $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
       if ($got -ne $want.ToLower()) {
         throw "Checksum verification FAILED for $file - refusing to install."
       }
       Write-Ok 'Checksum verified.'
+    } else {
+      Write-Warning "No checksum for $file in SHA256SUMS - could not verify."
     }
   } catch [System.Net.WebException] {
     Write-Warning "SHA256SUMS not published for $tag - skipping verification."

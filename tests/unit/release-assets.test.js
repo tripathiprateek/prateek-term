@@ -78,6 +78,27 @@ describe('the exact filenames the installers build URLs from', () => {
       .toBe('Prateek-Term-1.5.0-rc.1-arm64.AppImage');
   });
 
+  test('install.ps1 asks for the current win zip name', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const ps = fs.readFileSync(path.join(__dirname, '../../install.ps1'), 'utf8');
+    // The -win- infix arrived with the rc.2 collision fix; without it this 404s.
+    expect(ps).toContain('Prateek-Term-$ver-win-$Arch.zip');
+  });
+
+  test('install.ps1 avoids the two PowerShell 5.1 traps', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const ps = fs.readFileSync(path.join(__dirname, '../../install.ps1'), 'utf8');
+    // Without -UseBasicParsing, PS 5.1 routes parsing through the IE engine and
+    // throws NullReferenceException until IE's first-run wizard is done.
+    const calls = ps.match(/Invoke-(WebRequest|RestMethod)[^\n]*/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(c).toContain('-UseBasicParsing');
+    // \Q...\E is PCRE; .NET throws "Unrecognized escape sequence \Q".
+    expect(ps).not.toMatch(/-match[^\n]*\\Q/);
+  });
+
   test('install.sh asks for the arch names electron-builder actually emits', () => {
     const fs = require('fs');
     const path = require('path');
