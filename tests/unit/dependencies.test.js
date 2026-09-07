@@ -20,7 +20,9 @@ describe('dependencySpec', () => {
 
   test('covers the tools the app depends on', () => {
     const keys = dependencySpec().map((d) => d.key);
-    expect(keys).toEqual(expect.arrayContaining(['ssh', 'sshpass', 'cloudflared', 'node', 'telnet']));
+    expect(keys).toEqual(expect.arrayContaining(['ssh', 'cloudflared', 'node', 'telnet']));
+    // sshpass is POSIX-only — see the Windows exclusion test below.
+    if (process.platform !== 'win32') expect(keys).toContain('sshpass');
   });
 
   test('nothing uninstallable on this OS is listed', () => {
@@ -75,9 +77,11 @@ describe('checkDependencies', () => {
     expect(ssh.found).toBe(true);
     expect(ssh.path).toBe('/usr/bin/ssh');
 
-    const sshpass = report.find((d) => d.key === 'sshpass');
-    expect(sshpass.found).toBe(false);
-    expect(sshpass.path).toBeNull();
+    // cloudflared, not sshpass: sshpass is absent from the catalogue on
+    // Windows, so .find() would return undefined there.
+    const other = report.find((d) => d.key === 'cloudflared');
+    expect(other.found).toBe(false);
+    expect(other.path).toBeNull();
 
     // candidates array is forwarded to the probe (so GUI-launched apps with a
     // minimal PATH still find Homebrew/user-local binaries).
@@ -90,9 +94,9 @@ describe('checkDependencies', () => {
   });
 
   test('report preserves required/purpose/install for the UI', () => {
-    const d = checkDependencies(() => null).find((x) => x.key === 'sshpass');
+    const d = checkDependencies(() => null).find((x) => x.key === 'cloudflared');
     expect(d.required).toBe(false);
-    expect(d.purpose).toMatch(/password/i);
+    expect(d.purpose).toMatch(/cloudflare/i);
     expect(d.install.length).toBeGreaterThan(0);
   });
 });
