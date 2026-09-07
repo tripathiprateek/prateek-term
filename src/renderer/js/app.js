@@ -4456,8 +4456,12 @@ async function setupDependencyBanner() {
   const deps   = Array.isArray(res) ? res : (res && res.dependencies) || [];
   const issues = (res && res.issues) || [];
 
-  const missing  = deps.filter((d) => !d.found);
-  const outdated = deps.filter((d) => d.found && d.versionState === 'outdated');
+  // relevant === false means nothing in this setup uses the tool, so its
+  // absence is not a problem worth a banner. Older main processes omit the
+  // field entirely, hence the !== false rather than a truthy check.
+  const used     = deps.filter((d) => d.relevant !== false);
+  const missing  = used.filter((d) => !d.found);
+  const outdated = used.filter((d) => d.found && d.versionState === 'outdated');
   // Normalise everything into one list of {name, why, fix, critical} rows.
   const rows = [
     ...missing.map((d) => ({

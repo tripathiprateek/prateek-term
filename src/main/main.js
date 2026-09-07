@@ -59,10 +59,18 @@ ipcMain.handle('shells:list', () => ({
   detected: findShell(),
 }));
 
-ipcMain.handle('deps:check', async () => ({
-  dependencies: checkDependencies(),
-  issues: await runHealthChecks(),
-}));
+ipcMain.handle('deps:check', async () => {
+  // Pass the user's actual setup so the banner only flags tools something is
+  // configured to use — no telnet warning without a telnet profile, etc.
+  let ctx = {};
+  try {
+    ctx = { profiles: loadProfiles(), mcpEnabled: loadSettings().mcpEnabled !== false };
+  } catch { ctx = {}; }   // unreadable profiles → report everything, hide nothing
+  return {
+    dependencies: checkDependencies(platform.whichBin, undefined, ctx),
+    issues: await runHealthChecks(),
+  };
+});
 
 function getBuildNumber() {
   try {

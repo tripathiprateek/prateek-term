@@ -93,6 +93,37 @@ function dependencySpec() {
 }
 
 /**
+ * Is a tool actually needed by this user's setup?
+ *
+ * Warning about telnet when there is no telnet profile, or cloudflared when
+ * nobody uses Cloudflare Access, is noise — and noise is what teaches people to
+ * ignore the banner. `ssh` is always relevant (it is the app's core); the rest
+ * are relevant only when something is configured to use them.
+ *
+ * @param {string} key    dependency key
+ * @param {{profiles?: Array, mcpEnabled?: boolean}} ctx
+ * @returns {boolean} true when the tool matters here (unknown ctx → true, so a
+ *                    read failure never hides a genuine problem)
+ */
+function isRelevant(key, ctx = {}) {
+  if (key === 'ssh') return true;
+  const profiles = Array.isArray(ctx.profiles) ? ctx.profiles : null;
+  if (!profiles) return true;   // no profile data — do not silently hide anything
+
+  const any = (fn) => profiles.some((p) => { try { return fn(p || {}); } catch { return false; } });
+
+  switch (key) {
+    // Only the password jump-host path shells out to sshpass.
+    case 'sshpass':     return any((p) => p.proxyEnabled && p.proxyPassword);
+    case 'cloudflared': return any((p) => p.cloudflareAccess);
+    case 'telnet':      return any((p) => p.protocol === 'telnet');
+    // node runs the MCP server, so it only matters when MCP is switched on.
+    case 'node':        return ctx.mcpEnabled !== false;
+    default:            return true;
+  }
+}
+
+/**
  * Which package manager this machine actually has. The install command a user
  * can run differs per distro, so it is resolved at runtime rather than guessed
  * in the catalogue.
@@ -183,7 +214,7 @@ function defaultRunVersion(binPath, args) {
  * @returns {Array<{key,bin,required,purpose,install,found,path,version,minVersion,versionState}>}
  *          versionState: 'ok' | 'outdated' | 'unknown' | null (no version rule)
  */
-function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVersion) {
+function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVersion, ctx = {}) {
   const pm = packageManager(probe);
   return dependencySpec().map((d) => {
     let found = null;
@@ -206,6 +237,7 @@ function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVer
       key: d.key, bin: d.bin, required: d.required, purpose: d.purpose,
       install: d.install, found: !!found, path: found || null,
       installCmd: installCommand(d.key, pm),
+      relevant: isRelevant(d.key, ctx),
       version, minVersion: d.minVersion || null, versionState,
     };
   });
@@ -213,4 +245,5 @@ function checkDependencies(probe = platform.whichBin, runVersion = defaultRunVer
 
 module.exports = {
   dependencySpec, checkDependencies, compareVersions, packageManager, installCommand,
+  isRelevant,
 };

@@ -196,3 +196,66 @@ describe('banner Install button', () => {
     expect(fn[0]).not.toMatch(/row\.cmd \+ ['"`]\\[rn]/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Only warn about tools this setup actually uses
+// ---------------------------------------------------------------------------
+describe('isRelevant', () => {
+  const { isRelevant } = require('../../src/main/dependencies');
+
+  test('ssh is always relevant — it is the core of the app', () => {
+    expect(isRelevant('ssh', { profiles: [] })).toBe(true);
+  });
+
+  test('telnet only matters with a telnet profile', () => {
+    expect(isRelevant('telnet', { profiles: [{ protocol: 'ssh' }] })).toBe(false);
+    expect(isRelevant('telnet', { profiles: [{ protocol: 'telnet' }] })).toBe(true);
+  });
+
+  test('sshpass only matters for a PASSWORD jump host', () => {
+    expect(isRelevant('sshpass', { profiles: [{ proxyEnabled: true, proxyPemFile: '/k' }] })).toBe(false);
+    expect(isRelevant('sshpass', { profiles: [{ proxyEnabled: true, proxyPassword: 'x' }] })).toBe(true);
+    // A password with the proxy switched off is not a jump host.
+    expect(isRelevant('sshpass', { profiles: [{ proxyPassword: 'x' }] })).toBe(false);
+  });
+
+  test('cloudflared only matters with a Cloudflare Access profile', () => {
+    expect(isRelevant('cloudflared', { profiles: [{ protocol: 'ssh' }] })).toBe(false);
+    expect(isRelevant('cloudflared', { profiles: [{ cloudflareAccess: true }] })).toBe(true);
+  });
+
+  test('node follows the MCP setting', () => {
+    expect(isRelevant('node', { profiles: [], mcpEnabled: false })).toBe(false);
+    expect(isRelevant('node', { profiles: [], mcpEnabled: true })).toBe(true);
+  });
+
+  test('no profile data → report everything, hide nothing', () => {
+    // A failed profile read must never silence a real problem.
+    for (const k of ['sshpass', 'cloudflared', 'telnet']) {
+      expect(isRelevant(k, {})).toBe(true);
+      expect(isRelevant(k, { profiles: null })).toBe(true);
+    }
+  });
+
+  test('a malformed profile entry cannot throw', () => {
+    expect(() => isRelevant('telnet', { profiles: [null, undefined, 42] })).not.toThrow();
+  });
+});
+
+describe('banner honours relevance', () => {
+  const app = read('src/renderer/js/app.js');
+
+  test('rows with relevant === false are filtered out', () => {
+    const fn = app.match(/async function setupDependencyBanner[\s\S]{0,1400}/);
+    expect(fn[0]).toContain("d.relevant !== false");
+  });
+
+  test('main passes the real profiles and MCP setting into the check', () => {
+    const main = read('src/main/main.js');
+    const h = main.match(/ipcMain\.handle\('deps:check'[\s\S]{0,700}/);
+    expect(h[0]).toContain('loadProfiles()');
+    expect(h[0]).toContain('mcpEnabled');
+    // An unreadable profile store must fall back to reporting everything.
+    expect(h[0]).toContain('ctx = {}');
+  });
+});
