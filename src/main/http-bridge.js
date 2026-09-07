@@ -400,7 +400,10 @@ async function handleRequest(req, res) {
           cols:  200,
           rows:  50,
           _cleanupFiles: cmdInfo._cleanupFiles || [],
-          _pendingPassword: (profile.authType === 'password') ? profile.password : undefined,
+          // The whole profile, not one password: a jump host needs its own
+          // prompt answered too, and each password must go to the host it
+          // belongs to.
+          _pwdProfile: profile,
           profileName: body.profileName || null,
         });
         sessionId = result.id;

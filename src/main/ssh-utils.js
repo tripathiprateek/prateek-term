@@ -670,6 +670,44 @@ function cloudflareErrorHint(text) {
 }
 
 /**
+ * The passwords a connection will be asked for, in the order ssh asks.
+ *
+ * A jump-host connection produces TWO prompts — the jump host's, then the
+ * target's — and ssh labels each one "user@host's password:". Holding a single
+ * password and answering the first /password/i match sends the TARGET secret to
+ * the JUMP host, then leaves nothing for the target. Each entry therefore
+ * carries the user@host it belongs to.
+ *
+ * Mirrored in the renderer (buildPasswordQueue in app.js) because renderer code
+ * cannot require main-process modules; tests keep the two in step.
+ */
+function buildPasswordQueue(profile) {
+  if (!profile || (profile.protocol && profile.protocol !== 'ssh')) return [];
+  const who = (user, host) => (user ? `${user}@${host}` : String(host || ''));
+  const q = [];
+  if (profile.proxyEnabled && profile.proxyPassword && profile.proxyHost) {
+    q.push({ who: who(profile.proxyUsername, profile.proxyHost), password: profile.proxyPassword });
+  }
+  if (profile.authType === 'password' && profile.password && profile.host) {
+    q.push({ who: who(profile.username, profile.host), password: profile.password });
+  }
+  return q;
+}
+
+/**
+ * Pick the queued password that answers this prompt, removing it from the queue.
+ * Returns null when nothing matches — on a multi-hop connection that is
+ * deliberate: guessing is what sent the wrong secret to the wrong host.
+ */
+function answerPasswordPrompt(queue, buffer) {
+  if (!Array.isArray(queue) || !queue.length) return null;
+  if (!/password/i.test(String(buffer || ''))) return null;
+  let i = queue.findIndex((e) => e.who && String(buffer).includes(e.who));
+  if (i === -1 && queue.length === 1) i = 0;   // single unambiguous hop
+  return i === -1 ? null : queue.splice(i, 1)[0].password;
+}
+
+/**
  * Translate a raw SSH failure into something the user can act on.
  * Returns null when the text is not a case we recognise.
  */
@@ -698,6 +736,8 @@ module.exports = {
   cloudflareTokenStatus,
   cloudflareErrorHint,
   sshErrorHint,
+  buildPasswordQueue,
+  answerPasswordPrompt,
   decodeJwtExp,
   wrapWithAskpass,
   findSshpass,

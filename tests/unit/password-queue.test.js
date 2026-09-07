@@ -19,27 +19,10 @@
 const fs   = require('fs');
 const path = require('path');
 
-const who = (u, h) => (u ? `${u}@${h}` : String(h || ''));
-
-function buildPasswordQueue(cp) {
-  if (!cp || cp.protocol !== 'ssh') return [];
-  const q = [];
-  if (cp.proxyEnabled && cp.proxyPassword && cp.proxyHost) {
-    q.push({ who: who(cp.proxyUsername, cp.proxyHost), password: cp.proxyPassword });
-  }
-  if (cp.authType === 'password' && cp.password && cp.host) {
-    q.push({ who: who(cp.username, cp.host), password: cp.password });
-  }
-  return q;
-}
-
-/** Feed a prompt at the queue; returns the password sent, or null. */
-function answer(queue, prompt) {
-  if (!/password/i.test(prompt)) return null;
-  let i = queue.findIndex((e) => e.who && prompt.includes(e.who));
-  if (i === -1 && queue.length === 1) i = 0;
-  return i === -1 ? null : queue.splice(i, 1)[0].password;
-}
+// The real implementation — the MCP bridge uses this directly, and the
+// renderer mirrors it (renderer code cannot require main-process modules).
+const { buildPasswordQueue, answerPasswordPrompt: answer } =
+  require('../../src/main/ssh-utils');
 
 const G526 = {
   protocol: 'ssh', host: '192.168.2.140', username: 'root',
@@ -72,6 +55,7 @@ describe('buildPasswordQueue', () => {
   test('non-ssh protocols and junk input yield an empty queue', () => {
     expect(buildPasswordQueue({ ...G526, protocol: 'telnet' })).toEqual([]);
     expect(buildPasswordQueue(null)).toEqual([]);
+    expect(buildPasswordQueue(undefined)).toEqual([]);
   });
 
   test('a host with no username matches on host alone', () => {
@@ -136,5 +120,38 @@ describe('renderer source contract', () => {
 
   test('OSC injection waits until every password is answered', () => {
     expect(app).toContain('if (tab._pwdQueue && tab._pwdQueue.length) return;');
+  });
+});
+
+describe('the MCP bridge uses the same queue, not its own single password', () => {
+  const read = (f) => fs.readFileSync(path.join(__dirname, '../../', f), 'utf8');
+
+  test('nothing anywhere still holds one password for all hops', () => {
+    // http-bridge passed _pendingPassword (target only) and main.js answered
+    // the first /password/i match with it — the same bug as the renderer's,
+    // in a second subsystem.
+    for (const f of ['src/main/main.js', 'src/main/http-bridge.js', 'src/renderer/js/app.js']) {
+      expect(read(f)).not.toContain('_pendingPassword');
+    }
+  });
+
+  test('the bridge forwards the whole profile so both hops are covered', () => {
+    expect(read('src/main/http-bridge.js')).toContain('_pwdProfile: profile');
+  });
+
+  test('main answers bridge prompts through answerPasswordPrompt', () => {
+    const main = read('src/main/main.js');
+    expect(main).toContain('buildPasswordQueue(options._pwdProfile)');
+    expect(main).toContain('answerPasswordPrompt(pwdQueue, pwdBuf)');
+  });
+
+  test('the renderer mirror agrees with ssh-utils on the same profile', () => {
+    // Both must queue the same hosts in the same order, or UI tabs and MCP
+    // sessions would behave differently.
+    expect(buildPasswordQueue(G526).map((e) => e.who))
+      .toEqual(['pi@192.168.1.68', 'root@192.168.2.140']);
+    const app = read('src/renderer/js/app.js');
+    expect(app).toContain('function buildPasswordQueue(cp)');
+    expect(app).toContain('cp.proxyEnabled && cp.proxyPassword && cp.proxyHost');
   });
 });

@@ -43,6 +43,8 @@ const {
   cloudflareTokenStatus,
   cloudflareErrorHint,
   sshErrorHint,
+  buildPasswordQueue,
+  answerPasswordPrompt,
 } = require('./ssh-utils');
 
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
@@ -1967,18 +1969,20 @@ function spawnPtyForBridge(options) {
     }
   });
 
-  // Auto-type password for password-auth SSH sessions created via MCP.
-  // One-shot: fires exactly once. Uses a let flag so the closure can clear it
-  // and prevent repeat sends on SSH retry prompts ("Permission denied, try again").
+  // Auto-type passwords for SSH sessions created via MCP. One entry per hop,
+  // each answering only the prompt that names its own host — a jump-host
+  // connection is asked twice, and the target's password must not be sent to
+  // the jump host.
   let pwdBuf = '';
-  let pendingPwd = options._pendingPassword || null;
-  if (pendingPwd) {
+  const pwdQueue = buildPasswordQueue(options._pwdProfile);
+  if (pwdQueue.length) {
     term.onData((data) => {
-      if (!pendingPwd) return; // already fired
+      if (!pwdQueue.length) return;   // every hop answered
       pwdBuf = (pwdBuf + data).slice(-256);
-      if (/password/i.test(pwdBuf)) {
-        const pwd = pendingPwd;
-        pendingPwd = null; // clear BEFORE setTimeout so re-entrant data can't re-trigger
+      // answerPasswordPrompt removes the matched entry, so a retry prompt
+      // ("Permission denied, try again") cannot re-send the same password.
+      const pwd = answerPasswordPrompt(pwdQueue, pwdBuf);
+      if (pwd !== null) {
         pwdBuf = '';
         setTimeout(() => term.write(pwd + '\r'), 300);
       }
