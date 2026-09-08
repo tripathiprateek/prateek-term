@@ -804,7 +804,11 @@ function buildPasswordQueue(cp) {
   if (cp.proxyEnabled && cp.proxyPassword && cp.proxyHost) {
     q.push({ who: who(cp.proxyUsername, cp.proxyHost), password: cp.proxyPassword });
   }
-  if (cp.authType === 'password' && cp.password && cp.host) {
+  // authType may be MISSING on profiles written before the auth-button fix;
+  // a stored password is itself proof of password auth.
+  const targetIsPassword = cp.authType === 'password'
+    || (cp.authType === undefined && !!cp.password);
+  if (targetIsPassword && cp.password && cp.host) {
     q.push({ who: who(cp.username, cp.host), password: cp.password });
   }
   return q;
@@ -3728,10 +3732,15 @@ function updateProtocolSections() {
 }
 
 function setAuthType(authType) {
-  state.authType = authType;
-  document.querySelectorAll('.auth-type-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.auth === authType);
+  // Never let a bad value through: an undefined here is what wiped passwords.
+  state.authType = (authType === 'password' || authType === 'key' || authType === 'none')
+    ? authType
+    : 'key';
+  // [data-auth] only — the jump-host buttons share this class.
+  document.querySelectorAll('.auth-type-btn[data-auth]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.auth === state.authType);
   });
+  authType = state.authType;
   dom.authKeySection.classList.toggle('hidden', authType !== 'key');
   dom.authPasswordSection.classList.toggle('hidden', authType !== 'password');
 }
@@ -3941,6 +3950,9 @@ function getFormData() {
     data.keyMode = state.keyMode;
     data.pemFile = (state.authType === 'key' && state.keyMode === 'file') ? (dom.connPem.value || null) : null;
     data.pemText = (state.authType === 'key' && state.keyMode === 'paste') ? (dom.connPemText.value || null) : null;
+    // Only clear the password when the user has actually chosen a non-password
+    // auth mode. Deriving "no password" from a state field that could be
+    // corrupt is how the saved secret got destroyed.
     data.password = state.authType === 'password' ? dom.connPassword.value : null;
 
     data.compression = dom.optCompression.checked;
@@ -4238,7 +4250,15 @@ function saveCurrentProfile() {
   if (state.editingProfileId) {
     const index = state.profiles.findIndex((p) => p.id === state.editingProfileId);
     if (index !== -1) {
-      state.profiles[index] = { ...formData, id: state.editingProfileId };
+      // MERGE over the stored profile, never replace it. getFormData() only
+      // knows about fields the form renders, so replacing dropped everything
+      // else — most visibly aiEnabled, which is set by the sidebar AI toggle
+      // and has no form control, so every edit silently revoked AI/MCP access.
+      state.profiles[index] = {
+        ...state.profiles[index],
+        ...formData,
+        id: state.editingProfileId,
+      };
     }
   } else {
     const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -4782,8 +4802,15 @@ function setupEventListeners() {
     });
   });
 
-  // Auth type selector
-  document.querySelectorAll('.auth-type-btn').forEach((btn) => {
+  // Auth type selector. MUST exclude the jump-host buttons: all six share
+  // .auth-type-btn, and an unscoped selector bound this handler to the proxy
+  // ones too. Clicking "Jump Host Auth -> Password" then ran
+  // setAuthType(btn.dataset.auth) with dataset.auth === undefined, so
+  // state.authType became undefined and the next save wrote
+  //   authType: undefined  (JSON.stringify omits it entirely)
+  //   password: null       (the `=== 'password'` test failed)
+  // silently destroying the saved device password.
+  document.querySelectorAll('.auth-type-btn[data-auth]').forEach((btn) => {
     btn.addEventListener('click', () => {
       setAuthType(btn.dataset.auth);
       setSaveButtonMode('save');

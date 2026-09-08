@@ -163,7 +163,9 @@ describe('programmatic value changes trigger save mode', () => {
 
   test('Auth-type button click triggers save mode', () => {
     const authBtnBlock = source.slice(
-      source.indexOf("querySelectorAll('.auth-type-btn').forEach"),
+      // Scoped to [data-auth]: the unscoped selector also bound this handler
+      // to the jump-host buttons, which nulled the saved password on save.
+      source.indexOf("querySelectorAll('.auth-type-btn[data-auth]').forEach"),
       source.indexOf('// Password visibility toggle')
     );
     expect(authBtnBlock).toContain("setSaveButtonMode('save')");

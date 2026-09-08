@@ -688,7 +688,12 @@ function buildPasswordQueue(profile) {
   if (profile.proxyEnabled && profile.proxyPassword && profile.proxyHost) {
     q.push({ who: who(profile.proxyUsername, profile.proxyHost), password: profile.proxyPassword });
   }
-  if (profile.authType === 'password' && profile.password && profile.host) {
+  // authType may be MISSING on profiles written before the auth-button fix
+   // (an undefined state.authType was omitted by JSON.stringify). A stored
+   // password is itself proof of password auth, so do not ignore it.
+  const targetIsPassword = profile.authType === 'password'
+    || (profile.authType === undefined && !!profile.password);
+  if (targetIsPassword && profile.password && profile.host) {
     q.push({ who: who(profile.username, profile.host), password: profile.password });
   }
   return q;
