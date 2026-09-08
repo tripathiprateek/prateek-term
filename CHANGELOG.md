@@ -6,6 +6,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.5.0] — unreleased
+
+> Shipping for testing as **1.5.0-rc.4** (2026-09-08). This section becomes the
+> final 1.5.0 entry once the release candidate is verified on all three platforms.
+
+The cross-platform release. Everything from the `1.5.0` betas and earlier release
+candidates below, plus **installation through a package manager on all three
+platforms**, a **startup check for the tools the app shells out to**, and a set
+of jump-host and profile-editor fixes found by testing on real Windows, Linux
+and embedded hardware.
+
+### Added
+
+- **Install with one command, on every platform.** No more hand-downloading from the releases page:
+  - **macOS** — a Homebrew cask: `brew tap tripathiprateek/prateek-term && brew install --cask prateek-term`
+  - **Linux** — `curl -fsSL …/install.sh | sh` (AppImage, with a `.deb` fallback where the AppImage runtime is unusable). Takes `--channel stable|rc`, `--version vX.Y.Z`, `--with-deps` and `--uninstall`.
+  - **Windows** — a Scoop bucket: `scoop install prateek-term`, or `install.ps1` for a Scoop-free install.
+  - Every release now publishes **`SHA256SUMS`**, which all three installers verify against.
+- **Release channels** (Settings → General → Updates) — *Automatic* follows release candidates only if you are already running one, so installing an RC opts you in and you still get the final release when it ships. *Stable only* and *Include release candidates* override that.
+- **Startup environment check.** A banner appears when something the app depends on is missing or too old, listing each tool, what it is for, and how to install it — with a one-click **Install** button that opens a local tab pre-typed with the correct command for your package manager (`brew`, `apt`, `dnf`, `pacman`, `winget`). Nothing is executed until you press Enter.
+  - It only warns about tools **your** setup actually uses: `telnet` for a telnet profile, `sshpass` for a password jump host, `cloudflared` for a Cloudflare Access profile, `node` when MCP is enabled. `ssh` is always checked.
+  - Versions are checked, not just presence, so an OpenSSH or `cloudflared` too old for a feature is reported as *outdated* rather than silently failing later.
+- **Health checks** beyond missing binaries:
+  - **A dead SSH agent is detected.** When `SSH_AUTH_SOCK` points at a socket with no agent behind it, `ssh` hangs indefinitely during authentication — the failure mode looks like a network problem and is nearly impossible to diagnose from the terminal. The app now probes the agent at startup (with a timeout, so a broken agent can never delay launch) and tells you what to fix.
+  - **`~/.ssh` permissions** are audited on macOS/Linux — a group-writable key or directory makes OpenSSH refuse the key without explanation.
+- **Default Shell** (Settings → General) — choose which shell new local tabs open, from the shells actually installed on the machine. *System default* follows your login shell (`$SHELL`); existing tabs keep the shell they started with.
+
+### Fixed
+
+- **The update check could not see release candidates — or a hotfix.** `isVersionNewer()` stripped pre-release suffixes before comparing, so anyone running `1.5.0-beta.2` was offered neither `1.5.0-rc.1` nor the final `1.5.0`: they would have been stranded until `1.5.1`. Comparison now implements full SemVer 2.0 precedence (including numeric identifier ordering, so `rc.10` correctly beats `rc.2`). Separately, the GitHub releases API is date-ordered, so a `1.4.x` hotfix published after `1.5.0` was being offered as an "update" — the newest release is now chosen by version, not by date.
+- **Editing a profile destroyed its password and its AI access.** Two independent bugs in the same save path: the auth-type buttons were located with an unscoped selector that also matched the jump-host buttons, so saving a profile blanked the device password; and the save *replaced* the stored profile instead of merging into it, dropping `aiEnabled` (and anything else not present on the form) on **every** edit. Editing a profile now preserves every field it does not touch.
+- **A jump-host connection typed the wrong password at each hop.** The password was tracked as a single pending value, so the jump host could be answered with the target's password and vice versa. Each hop now has its own queued credential, which also means the target device's password is never sent to the jump host.
+- **Jump hosts failed on Windows** with `CreateProcessW failed error:2` — the proxy command named `sshpass`, which does not exist on Windows. Windows now uses OpenSSH's own `-W` stdio forwarding for the hop, and `sshpass` is no longer listed as a dependency there (it was shown as "missing" next to a hint saying it is unavailable — a problem the user could not fix).
+- **Password jump hosts hung before the password prompt.** The inner `ssh` tried publickey and agent authentication first; with a dead agent socket that blocks forever. Password jump hosts now force `PreferredAuthentications=password`, `PubkeyAuthentication=no` and `IdentityAgent=none`.
+- **The MCP bridge had the same wrong-password bug** as the terminal path, and is now driven by the same per-hop credential logic.
+- **The cwd reporter broke shells on embedded devices.** The OSC 7 injection fired on a fixed 1.5 s timer, which raced with slow logins, and used a tty line-kill that shredded any unconsumed input — producing `-sh: syntax error: unexpected "("` on BusyBox/dropbear devices. It now waits for an actual shell prompt (never a password prompt) and never line-kills.
+- **The version and build number were missing from the titlebar** — they are now set before anything else in startup, so a later failure cannot leave the titlebar blank.
+- **`package.json` declared the license as MIT** while `LICENSE` is PolyForm Noncommercial 1.0.0. The manifest now matches the actual license, and a test keeps the two in sync.
+- **Release artifacts collided.** The macOS and Windows ARM64 builds produced the same filename, so `v1.5.0-rc.1`'s "Windows arm64" zip actually contained the macOS `.app`. Artifact names are now explicit and arch-suffixed on every platform, and the AppImage carries its architecture.
+- Numerous fixes to the installers themselves, all found on real machines rather than in CI: `install.sh` now works with `wget` (stock Ubuntu Desktop has no `curl`) and falls back to the `.deb` where the arm64 AppImage runtime cannot start; `install.ps1` had four separate failures on a real Windows box (wrong asset name, PowerShell 5.1's `-UseBasicParsing`, JSON tag extraction, and a `Byte[]` response body).
+
+### Changed
+
+- **CI gained a release guard** — a tag is rejected unless it matches `package.json` and has the expected `vX.Y.Z[-rc.N]` shape, so a mistyped tag fails in seconds instead of publishing a mislabelled release. A `publish-managers` job then updates the Homebrew tap and Scoop bucket with the new version and checksums automatically.
+- Artifact filenames are deterministic and always arch-suffixed (electron-builder omits `-x64` by default, which all three installers depend on).
+
+### Known limitations
+
+- **macOS builds are Apple Silicon only.** The cask declares `depends_on arch: :arm64`, so an Intel Mac gets a clear error instead of an app that cannot launch.
+- **Not code-signed.** macOS is ad-hoc signed but not notarized, so Gatekeeper may refuse the first launch (`xattr -dr com.apple.quarantine /Applications/Prateek-Term.app`, or right-click → Open). The Windows `.exe` is unsigned and triggers SmartScreen — Scoop and `install.ps1` avoid this by extracting a zip. Verify any download against the published `SHA256SUMS`.
+- **The Linux `.deb` is a manual install**, deliberately not driven by `install.sh`: under `dpkg`, `1.5.0-rc.1` sorts as *newer* than the final `1.5.0`, so apt would refuse the upgrade to stable.
+- **Windows has no `sshpass`**, so SCP/SFTP **password** auth (drag-drop upload, MCP `upload_file`) is unavailable there — use **key auth** on Windows. Interactive SSH terminal password auth, including through a jump host, works on every platform.
+
+---
+
 ## [1.5.0-beta.2] — 2026-07-30
 
 Cross-platform release. Prateek-Term, previously macOS-only, now runs natively on **macOS, Windows, and Linux**, with per-OS native integrations and installers for every platform.

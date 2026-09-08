@@ -32,6 +32,7 @@ No plugins. No wrappers. Built in.
 - **Tab groups** — tabs auto-grouped by connection tags (HOME, AWS, etc.) with colored labels; drag tabs between groups, collapse/expand groups
 - **Bracketed paste** for safe multi-line input
 - **Middle-click paste** from clipboard
+- **Choose your shell** — pick which shell new local tabs open (zsh, bash, fish, sh…), from the shells actually installed; defaults to your login shell
 
 ### SSH / Serial / File Transfer
 - **SSH** with PEM/identity file support, custom SSH options, ssh-config import/export
@@ -51,6 +52,13 @@ No plugins. No wrappers. Built in.
 - **Custom Actions** — define per-profile scripts that execute instantly in the terminal
 - Export / Import profiles and actions as JSON
 - **Per-profile AI toggle** — click the AI chip on any sidebar profile to grant or revoke AI/MCP access; no special tags needed
+
+### Setup & Updates
+- **Startup environment check** — a banner appears when a CLI tool the app shells out to is missing *or too old*, with a one-click **Install** button that opens a local tab pre-typed with the right command for your package manager (`brew`, `apt`, `dnf`, `pacman`, `winget`). Nothing runs until you press Enter
+- **Only warns about what you use** — `telnet` for a telnet profile, `sshpass` for a password jump host, `cloudflared` for a Cloudflare profile, `node` when MCP is on. `ssh` is always checked
+- **Dead SSH agent detection** — a `SSH_AUTH_SOCK` pointing at a socket with no agent behind it makes `ssh` hang forever during auth; the app probes for it at startup instead of leaving you to guess
+- **`~/.ssh` permission audit** (macOS/Linux) — catches the group-writable key that OpenSSH silently refuses
+- **Release channels** — *Automatic* follows release candidates only if you already run one, so installing an RC opts you in and you still get the final release; or pin to stable-only
 
 ### MCP for AI Agents
 
@@ -125,8 +133,9 @@ terminal rather than through a pipe:
 
 ```sh
 sh -c "$(wget -qO- https://raw.githubusercontent.com/tripathiprateek/prateek-term/main/install.sh)" -- --with-deps
-``` Arguments must come after `-s --`, because the script is being
-piped into `sh`:
+```
+
+Arguments must come after `-s --`, because the script is being piped into `sh`:
 
 ```sh
 curl -fsSL .../install.sh | sh -s -- --uninstall
@@ -197,7 +206,7 @@ Claude: "Connect to my staging server and check disk usage"
 ```bash
 npm install          # install dependencies
 npm start            # run in development mode
-npm test             # run test suite (729 tests)
+npm test             # run test suite (879 tests)
 npm run lint         # lint source
 ```
 
@@ -220,7 +229,8 @@ CI builds all three in a matrix (`.github/workflows/ci.yml`) and attaches every 
 
 ### Platform notes
 
-- **SSH password auth** works everywhere via in-terminal auto-type.
+- **SSH password auth** works everywhere via in-terminal auto-type, including through a password-authenticated jump host (each hop gets its own credential — the target's password is never sent to the jump host).
+- **Missing CLI tools are reported at startup**, with an install command for your package manager — see *Setup & Updates* above.
 - **SCP/SFTP password auth** (drag-drop upload, MCP `upload_file`) needs `sshpass`, which doesn't exist on Windows — use **key-based auth** there. macOS/Linux are unaffected.
 - **Linux file-manager "open here"** integration varies by desktop environment; the `.desktop` entry + `prateekterm://` handler are installed automatically, per-DE context-menu actions may need a manual step.
 
