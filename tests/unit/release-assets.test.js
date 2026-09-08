@@ -172,3 +172,66 @@ describe('CI publishes what the installers expect', () => {
     expect(ci).not.toContain('files: dist/*');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The download tables must name files that actually exist
+// ---------------------------------------------------------------------------
+describe('every filename quoted in the docs is one CI really produces', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const read = (p) => fs.readFileSync(path.join(__dirname, '../../', p), 'utf8');
+
+  const VER = '1.5.0-rc.9';
+
+  /**
+   * Every asset electron-builder will emit for VER. Built from the same
+   * artifactName templates the build uses, so a template change moves this set
+   * and any doc still naming the old file fails.
+   */
+  const real = new Set();
+  {
+    const V2 = { productName: pkg.build.productName, version: VER };
+    const n = (tpl, arch, ext) => render(tpl, { ...V2, arch, ext });
+    // dmg has no artifactName of its own — it inherits mac's.
+    for (const ext of ['dmg', 'zip']) real.add(n(pkg.build.mac.artifactName, 'arm64', ext));
+    for (const arch of ['x64', 'arm64']) {
+      real.add(n(pkg.build.win.artifactName,  arch, 'zip'));
+      real.add(n(pkg.build.nsis.artifactName, arch, 'exe'));
+      real.add(n(pkg.build.portable.artifactName, arch, 'exe'));
+    }
+    // AppImage arch names are electron-builder's own (x86_64, not x64).
+    for (const arch of ['x86_64', 'arm64']) real.add(n(pkg.build.appImage.artifactName, arch, 'AppImage'));
+    // .deb uses the electron-builder default template.
+    for (const arch of ['amd64', 'arm64']) real.add(`${pkg.name}_${VER}_${arch}.deb`);
+  }
+
+  /** Backticked artifact filenames, with the doc's version placeholder normalized. */
+  const quoted = (src) =>
+    // ci.yml writes the table inside a shell heredoc, so its backticks are
+    // escaped as \` — unescape before matching.
+    [...src.replace(/\\`/g, '`')
+        .matchAll(/`((?:Prateek-Term|prateek-term)[^`\s]*\.(?:dmg|zip|exe|AppImage|deb))`/g)]
+      .map((m) => m[1]
+        .replace(/\$\{VERSION\}/g, VER)
+        .replace(/\d+\.\d+\.\d+(?:-rc\.\d+)?/g, VER))
+      .filter((f, i, a) => a.indexOf(f) === i);
+
+  for (const doc of ['.github/workflows/ci.yml', 'RELEASE_NOTES.md']) {
+    test(`${doc} names only real assets`, () => {
+      const named = quoted(read(doc));
+      // A table that matched nothing would pass vacuously.
+      expect(named.length).toBeGreaterThan(4);
+      // v1.5.0-rc.4's release page listed Prateek-Term-<v>-arm64.dmg, which is
+      // not what the mac template produces (…-mac-arm64.dmg). Readers were sent
+      // looking for a file that was never uploaded.
+      expect(named.filter((f) => !real.has(f))).toEqual([]);
+    });
+  }
+
+  test('the doc tables cover every platform we ship', () => {
+    const named = quoted(read('.github/workflows/ci.yml'));
+    for (const want of ['.dmg', '-x64.exe', '-arm64.exe', '.AppImage', '_amd64.deb']) {
+      expect(named.some((f) => f.endsWith(want))).toBe(true);
+    }
+  });
+});

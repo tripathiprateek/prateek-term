@@ -304,10 +304,11 @@ jobs:
           ### Or download directly
           | Platform | File |
           |----------|------|
-          | macOS (Apple Silicon) | \`Prateek-Term-${VERSION}-arm64.dmg\` |
-          | Windows x64 | \`Prateek-Term-Setup-${VERSION}-x64.exe\` (installer) / \`-portable.exe\` |
-          | Windows ARM64 | \`Prateek-Term-Setup-${VERSION}-arm64.exe\` (installer) / \`-portable.exe\` |
-          | Linux x64 / ARM64 | \`Prateek-Term-${VERSION}[-arm64].AppImage\` / \`.deb\` |
+          | macOS (Apple Silicon) | \`Prateek-Term-${VERSION}-mac-arm64.dmg\` · \`Prateek-Term-${VERSION}-mac-arm64.zip\` |
+          | Windows x64 | \`Prateek-Term-Setup-${VERSION}-x64.exe\` (installer) · \`Prateek-Term-${VERSION}-x64-portable.exe\` |
+          | Windows ARM64 | \`Prateek-Term-Setup-${VERSION}-arm64.exe\` (installer) · \`Prateek-Term-${VERSION}-arm64-portable.exe\` |
+          | Linux x64 | \`Prateek-Term-${VERSION}-x86_64.AppImage\` · \`prateek-term_${VERSION}_amd64.deb\` |
+          | Linux ARM64 | \`Prateek-Term-${VERSION}-arm64.AppImage\` · \`prateek-term_${VERSION}_arm64.deb\` |
 
           Verify any download against \`SHA256SUMS\`, published with this release.
 

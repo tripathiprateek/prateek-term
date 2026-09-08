@@ -57,9 +57,11 @@ Prefer a direct download? See the table below, and verify against the `SHA256SUM
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `Prateek-Term-1.5.0-rc.4-arm64.dmg` · `-arm64-mac.zip` |
-| Windows x64 / ARM64 | `Prateek-Term-Setup-1.5.0-rc.4-{x64,arm64}.exe` (installer) · `…-portable.exe` |
-| Linux x64 / ARM64 | `Prateek-Term-1.5.0-rc.4[-arm64].AppImage` · `prateek-term_1.5.0-rc.4_{amd64,arm64}.deb` |
+| macOS (Apple Silicon) | `Prateek-Term-1.5.0-rc.4-mac-arm64.dmg` · `Prateek-Term-1.5.0-rc.4-mac-arm64.zip` |
+| Windows x64 | `Prateek-Term-Setup-1.5.0-rc.4-x64.exe` (installer) · `Prateek-Term-1.5.0-rc.4-x64-portable.exe` |
+| Windows ARM64 | `Prateek-Term-Setup-1.5.0-rc.4-arm64.exe` (installer) · `Prateek-Term-1.5.0-rc.4-arm64-portable.exe` |
+| Linux x64 | `Prateek-Term-1.5.0-rc.4-x86_64.AppImage` · `prateek-term_1.5.0-rc.4_amd64.deb` |
+| Linux ARM64 | `Prateek-Term-1.5.0-rc.4-arm64.AppImage` · `prateek-term_1.5.0-rc.4_arm64.deb` |
 
 **First launch.** macOS — the app is ad-hoc signed but not notarized, so if Gatekeeper refuses it, run `xattr -dr com.apple.quarantine /Applications/Prateek-Term.app` or right-click → **Open** → Open. Windows — the `.exe` is unsigned; click **More info → Run anyway** (Scoop and `install.ps1` extract a zip and avoid this entirely). Linux `.deb` — `sudo dpkg -i …`, then Settings → General → register OS integration; log out/in for the dash icon.
 
