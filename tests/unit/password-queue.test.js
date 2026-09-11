@@ -72,10 +72,13 @@ describe('answering the prompts', () => {
     expect(q).toHaveLength(0);
   });
 
-  test('order does not matter — matching is by host, not position', () => {
+  test('matching is by host, not by position', () => {
+    // The jump prompt arrives first (it has to — the jump hop carries the
+    // target's traffic), and must be answered with the JUMP password even
+    // though a target entry is also queued.
     const q = buildPasswordQueue(G526);
-    expect(answer(q, "root@192.168.2.140's password: ")).toBe('TARGETPW');
     expect(answer(q, "pi@192.168.1.68's password: ")).toBe('JUMPPW');
+    expect(q.map((e) => e.who)).toEqual(['root@192.168.2.140']);
   });
 
   test('the target password is never sent to the jump host', () => {
@@ -153,5 +156,89 @@ describe('the MCP bridge uses the same queue, not its own single password', () =
     const app = read('src/renderer/js/app.js');
     expect(app).toContain('function buildPasswordQueue(cp)');
     expect(app).toContain('cp.proxyEnabled && cp.proxyPassword && cp.proxyHost');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A queue entry whose prompt NEVER appears must not strand the queue
+// ---------------------------------------------------------------------------
+/**
+ * On macOS/Linux the jump hop is answered by sshpass *inside the ProxyCommand's
+ * own PTY* (ssh-utils.js buildJumpHostProxyCommand), so "pi@…'s password:" is
+ * never written to the terminal we watch. Only the target prompts.
+ *
+ * The queue therefore shrank by one and kept the jump entry forever. Two
+ * consequences, one reported and one found while investigating it:
+ *
+ *  1. maybeFireOscInjection() gates on `_pwdQueue.length`, so a permanently
+ *     non-empty queue blocked the OSC 7 cwd reporter for the life of the tab.
+ *     tab._remoteCwd stayed null and drag-drop SCP fell back to the remote home
+ *     — uploading to /home/root on a read-only rootfs instead of the cwd.
+ *  2. With exactly one entry left, the "single unambiguous hop" fallback made
+ *     ANY later output containing the word "password" auto-type the JUMP HOST's
+ *     password into the already-logged-in target shell.
+ */
+describe('a hop answered out-of-band never strands the queue', () => {
+  test('macOS jump host: answering the target empties the queue', () => {
+    // sshpass swallowed the jump prompt — it never reaches us.
+    const q = buildPasswordQueue(G526);
+    expect(answer(q, "root@192.168.2.140's password: ")).toBe('TARGETPW');
+    // Was length 1 (the orphaned jump entry) → OSC 7 injection blocked forever.
+    expect(q).toHaveLength(0);
+  });
+
+  test('the orphan is never auto-typed into the logged-in shell', () => {
+    const q = buildPasswordQueue(G526);
+    answer(q, "root@192.168.2.140's password: ");
+    // Anything at all afterwards that merely mentions "password".
+    for (const line of [
+      'Last login: changing your password is recommended',
+      '$ grep -r password /etc/config',
+      'passwd: password updated successfully',
+    ]) {
+      expect(answer(q, line)).toBeNull();
+    }
+  });
+
+  test('a jump hop is never answered by the single-hop fallback', () => {
+    // Target uses key auth, so only the jump entry is queued — and on macOS its
+    // prompt never appears either. A stray "password" in output must not type it.
+    const q = buildPasswordQueue({ ...G526, authType: 'key', password: '' });
+    expect(q.map((e) => e.who)).toEqual(['pi@192.168.1.68']);
+    expect(answer(q, 'Enter password for the database: ')).toBeNull();
+  });
+
+  test('Windows still works — both prompts really are shown there', () => {
+    // No sshpass on Windows, so ssh prompts for both hops in order.
+    const q = buildPasswordQueue(G526);
+    expect(answer(q, "pi@192.168.1.68's password: ")).toBe('JUMPPW');
+    expect(answer(q, "root@192.168.2.140's password: ")).toBe('TARGETPW');
+    expect(q).toHaveLength(0);
+  });
+
+  test('a genuine single-hop prompt is still answered', () => {
+    const q = buildPasswordQueue({ ...G526, proxyEnabled: false });
+    expect(answer(q, 'Password: ')).toBe('TARGETPW');
+  });
+});
+
+describe('renderer: reaching a shell prompt ends authentication', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/renderer/js/app.js'), 'utf8');
+
+  test('the OSC gate cannot be blocked forever by a stranded entry', () => {
+    // Password prompts end in ':' so they never match the shell-prompt regex —
+    // an interactive prompt therefore proves auth is done and the queue is moot.
+    const fn = app.match(/function maybeFireOscInjection\(tab, data\)[\s\S]{0,2600}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toMatch(/if \(atPrompt && tab\._pwdQueue && tab\._pwdQueue\.length\) tab\._pwdQueue = \[\];/);
+  });
+
+  test('the queue is emptied BEFORE the gate that reads its length', () => {
+    const fn = app.match(/function maybeFireOscInjection\(tab, data\)[\s\S]{0,2600}/)[0];
+    const clear = fn.indexOf('tab._pwdQueue = []');
+    const gate  = fn.indexOf('if (tab._pwdQueue && tab._pwdQueue.length) return;');
+    expect(clear).toBeGreaterThan(-1);   // not vacuous: both must be present
+    expect(gate).toBeGreaterThan(-1);
+    expect(clear).toBeLessThan(gate);
   });
 });

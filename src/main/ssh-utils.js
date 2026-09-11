@@ -686,7 +686,7 @@ function buildPasswordQueue(profile) {
   const who = (user, host) => (user ? `${user}@${host}` : String(host || ''));
   const q = [];
   if (profile.proxyEnabled && profile.proxyPassword && profile.proxyHost) {
-    q.push({ who: who(profile.proxyUsername, profile.proxyHost), password: profile.proxyPassword });
+    q.push({ who: who(profile.proxyUsername, profile.proxyHost), password: profile.proxyPassword, kind: 'proxy' });
   }
   // authType may be MISSING on profiles written before the auth-button fix
    // (an undefined state.authType was omitted by JSON.stringify). A stored
@@ -694,7 +694,7 @@ function buildPasswordQueue(profile) {
   const targetIsPassword = profile.authType === 'password'
     || (profile.authType === undefined && !!profile.password);
   if (targetIsPassword && profile.password && profile.host) {
-    q.push({ who: who(profile.username, profile.host), password: profile.password });
+    q.push({ who: who(profile.username, profile.host), password: profile.password, kind: 'target' });
   }
   return q;
 }
@@ -708,8 +708,19 @@ function answerPasswordPrompt(queue, buffer) {
   if (!Array.isArray(queue) || !queue.length) return null;
   if (!/password/i.test(String(buffer || ''))) return null;
   let i = queue.findIndex((e) => e.who && String(buffer).includes(e.who));
-  if (i === -1 && queue.length === 1) i = 0;   // single unambiguous hop
-  return i === -1 ? null : queue.splice(i, 1)[0].password;
+  // Single unambiguous hop: some servers just say "Password:" with no user@host.
+  // Never applies to a jump hop — on macOS/Linux sshpass answers that one inside
+  // the ProxyCommand's own PTY, so an unmatched proxy entry means "already done",
+  // not "this prompt is probably it". Guessing there would type the jump host's
+  // password into whatever asked, including an already-logged-in target shell.
+  if (i === -1 && queue.length === 1 && queue[0].kind !== 'proxy') i = 0;
+  if (i === -1) return null;
+  // ssh authenticates hop by hop in queue order, so a prompt from hop i proves
+  // every earlier hop is already through — answered out-of-band by sshpass and
+  // never going to prompt us. Drop them with it: a hop left queued forever
+  // blocks the OSC 7 cwd reporter (see maybeFireOscInjection) and leaves a live
+  // password waiting to be typed at the next line of output saying "password".
+  return queue.splice(0, i + 1)[i].password;
 }
 
 /**

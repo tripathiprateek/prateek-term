@@ -802,14 +802,14 @@ function buildPasswordQueue(cp) {
   const who = (user, host) => (user ? `${user}@${host}` : String(host || ''));
   const q = [];
   if (cp.proxyEnabled && cp.proxyPassword && cp.proxyHost) {
-    q.push({ who: who(cp.proxyUsername, cp.proxyHost), password: cp.proxyPassword });
+    q.push({ who: who(cp.proxyUsername, cp.proxyHost), password: cp.proxyPassword, kind: 'proxy' });
   }
   // authType may be MISSING on profiles written before the auth-button fix;
   // a stored password is itself proof of password auth.
   const targetIsPassword = cp.authType === 'password'
     || (cp.authType === undefined && !!cp.password);
   if (targetIsPassword && cp.password && cp.host) {
-    q.push({ who: who(cp.username, cp.host), password: cp.password });
+    q.push({ who: who(cp.username, cp.host), password: cp.password, kind: 'target' });
   }
   return q;
 }
@@ -2097,8 +2097,6 @@ function maybeFireOscInjection(tab, data) {
     return;
   }
   if (tab._oscInjected) return;
-  // Password auto-type still pending → keep waiting, we're not at shell yet
-  if (tab._pwdQueue && tab._pwdQueue.length) return;   // still authenticating
   if (tab._oscWatchBuf === undefined) return; // injection not armed yet
 
   tab._oscWatchBuf = (tab._oscWatchBuf + data).slice(-512);
@@ -2111,6 +2109,19 @@ function maybeFireOscInjection(tab, data) {
   // Prompt at end of buffer: #, $, >, % followed by optional whitespace.
   // Password prompts end in `:` — excluded naturally.
   const atPrompt = /[#$>%]\s*$/.test(clean);
+
+  // An interactive prompt means authentication is over: password prompts end in
+  // ':' and can never match this regex. Anything still queued was answered
+  // out-of-band — on macOS/Linux sshpass answers the jump hop inside the
+  // ProxyCommand's own PTY, so that prompt never reaches us at all. Discard it.
+  // Leaving it queued is what broke drag-drop: the length gate below then
+  // returned on every chunk for the life of the tab, the cwd reporter was never
+  // injected, _remoteCwd stayed null and uploads fell back to the remote home.
+  if (atPrompt && tab._pwdQueue && tab._pwdQueue.length) tab._pwdQueue = [];
+
+  // Password auto-type still pending → keep waiting, we're not at shell yet
+  if (tab._pwdQueue && tab._pwdQueue.length) return;   // still authenticating
+
   if (atPrompt) {
     clearTimeout(tab._oscDebounceTimer);
     // 400ms of quiet after the prompt → shell is idle → safe to inject
@@ -2809,9 +2820,14 @@ function setupTerminalListeners() {
           // remaining entry keeps single-hop connections working even if the
           // server words its prompt differently.
           let i = tab._pwdQueue.findIndex((e) => e.who && tab._pwdBuf.includes(e.who));
-          if (i === -1 && tab._pwdQueue.length === 1) i = 0;
+          // Never guess for a jump hop — sshpass answers that one inside the
+          // ProxyCommand's own PTY, so an unmatched proxy entry means "already
+          // done", not "this prompt is probably it".
+          if (i === -1 && tab._pwdQueue.length === 1 && tab._pwdQueue[0].kind !== 'proxy') i = 0;
           if (i !== -1) {
-            const entry = tab._pwdQueue.splice(i, 1)[0];
+            // A prompt from hop i proves every earlier hop is already through.
+            // Drop them with it — see answerPasswordPrompt in ssh-utils.js.
+            const entry = tab._pwdQueue.splice(0, i + 1)[i];
             tab._pwdBuf = '';
             // 300 ms: enough time for SSH to put the PTY in no-echo mode
             setTimeout(() => window.terminalAPI.sendInput(id, entry.password + '\r'), 300);
