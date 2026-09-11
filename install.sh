@@ -225,18 +225,33 @@ fi
 say "Installing Prateek-Term $VERSION ($ARCH, $CHANNEL channel)..."
 fetch "$BASE/$FILE" "$TMP/$FILE" || die "download failed: $BASE/$FILE"
 
+# SHA256SUMS covers every asset in the release, so fetch it once and check each
+# payload we actually install against it. The app is not code-signed, so this is
+# the only integrity guarantee a user gets — it has to cover whatever ends up on
+# disk, not just the file we happened to download first.
 if fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" 2>/dev/null; then
   if   command -v sha256sum >/dev/null 2>&1; then SUM="sha256sum"
   elif command -v shasum    >/dev/null 2>&1; then SUM="shasum -a 256"
   else die "need sha256sum or shasum to verify the download."
   fi
-  # SHA256SUMS carries bare filenames (see the CI step that generates it).
-  ( cd "$TMP" && grep " ${FILE}\$" SHA256SUMS | $SUM -c - >/dev/null 2>&1 ) \
-    || die "checksum verification FAILED for $FILE — refusing to install."
-  say "Checksum verified."
+  HAVE_SUMS=yes
 else
+  HAVE_SUMS=no
   say "warning: SHA256SUMS not published for $TAG — skipping verification."
 fi
+
+# verify <filename> — check $TMP/<filename> against the release's SHA256SUMS.
+# A filename missing from SHA256SUMS also fails: grep matches nothing, and
+# `$SUM -c -` on empty input exits non-zero. Fail closed, never silently pass.
+verify() {
+  [ "$HAVE_SUMS" = yes ] || return 0
+  # SHA256SUMS carries bare filenames (see the CI step that generates it).
+  ( cd "$TMP" && grep " $1\$" SHA256SUMS | $SUM -c - >/dev/null 2>&1 ) \
+    || die "checksum verification FAILED for $1 — refusing to install."
+  say "Checksum verified: $1"
+}
+
+verify "$FILE"
 
 # ── can the AppImage runtime actually start? ────────────────────────────────
 # The aarch64 runtime electron-builder bundles links against the unversioned
@@ -265,6 +280,8 @@ if [ "$USE_DEB" = yes ]; then
   # dpkg-deb -x unpacks without root, so the sudo-free promise holds.
   DEB="prateek-term_${VERSION}_${DEB_ARCH}.deb"
   fetch "$BASE/$DEB" "$TMP/$DEB" || die "download failed: $BASE/$DEB"
+  # This payload — not the AppImage verified above — is what gets installed.
+  verify "$DEB"
   dpkg-deb -x "$TMP/$DEB" "$LIB/app" || die "could not unpack $DEB"
   APPBIN="$LIB/app/opt/Prateek-Term/prateek-term"
   [ -x "$APPBIN" ] || die "unexpected .deb layout: $APPBIN missing"
