@@ -63,9 +63,11 @@ describe('writeAskpassScript', () => {
   });
 
   test('embeds the password in the script body', () => {
-    writeAskpassScript('Vf@!2345');
+    // Placeholder, never a real credential: this file is committed to a public
+    // repo, and the value that used to be here was a live device password.
+    writeAskpassScript('P@ssw0rd-placeholder!');
     const content = fs.writeFileSync.mock.calls[0][1];
-    expect(content).toContain('Vf@!2345');
+    expect(content).toContain('P@ssw0rd-placeholder!');
   });
 
   test('escapes single quotes in password safely', () => {

@@ -49,6 +49,7 @@ const {
 
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
 const platform = require('./platform');
+const { redactSecrets } = require('./redact');
 const { checkDependencies } = require('./dependencies');
 const { runHealthChecks } = require('./health-checks');
 
@@ -313,7 +314,10 @@ function dbgLog(msg) {
     const settings = loadSettings();
     if (!settings.debugLogging) return;
     maybeRotateDebugLog();
-    const line = `${new Date().toISOString()} ${msg}\n`;
+    // Several call sites log a full argv, and a password jump host carries its
+    // secret inside it as `sshpass -p <password>`. Redact here, at the single
+    // chokepoint, so no future log line can reintroduce the leak.
+    const line = `${new Date().toISOString()} ${redactSecrets(msg)}\n`;
     fs.appendFileSync(DEBUG_LOG_PATH, line);
   } catch {}
 }
@@ -1952,7 +1956,9 @@ function spawnPtyForBridge(options) {
   }
   delete env.SSH_ASKPASS;
   delete env.SSH_ASKPASS_REQUIRE;
-  dbgLog(`[MCP bridge] spawnPtyForBridge: shell=${shell} args=[${args.join(', ')}] SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK || 'unset'}`);
+  // profile= is what distinguishes "the client omitted profileName" from
+  // "the profile resolved wrongly" — without it both look identical here.
+  dbgLog(`[MCP bridge] spawnPtyForBridge: profile=${options.profileName || '(none — inline)'} shell=${shell} args=[${args.join(', ')}] SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK || 'unset'}`);
 
   const id   = ++terminalIdCounter;
   // Register the output buffer BEFORE spawning so no early PTY data is lost
