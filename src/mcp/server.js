@@ -135,7 +135,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'list_profiles',
-      description: 'List SSH and serial connection profiles saved in Prateek-Term that are tagged as AI-accessible (tagged "ai").',
+      description: 'List connection profiles saved in Prateek-Term that have AI access enabled — i.e. the per-profile AI toggle is on, or the profile was created with aiEnabled: true. Tags do not grant access.',
       inputSchema: { type: 'object', properties: {}, required: [] },
     },
     {
@@ -150,10 +150,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: 'object',
         properties: {
           profileName: { type: 'string', description: 'Name of a saved AI-accessible profile (from list_profiles).' },
-          protocol:    { type: 'string', enum: ['local', 'ssh', 'serial'], description: 'Protocol for inline connections (default: local).' },
+          protocol:    { type: 'string', enum: ['local', 'ssh', 'serial'], description: 'Protocol for an inline connection. Required when profileName is omitted — there is no default, and omitting both is an error.' },
           host:        { type: 'string', description: 'Hostname for inline SSH (no credentials accepted — use a saved profile instead).' },
           port:        { type: 'number', description: 'SSH port number (default: 22).' },
-          serialPort:  { type: 'string', description: 'Serial device path for serial connections (e.g. /dev/tty.usbserial-0001). Use list_serial_ports to discover available ports.' },
+          serialPort:  { type: 'string', description: 'Serial device path (e.g. /dev/tty.usbserial-0001), with protocol: "serial". Use list_serial_ports to discover available ports.' },
           baudRate:    { type: 'number', description: 'Baud rate for serial connections (default: 115200).' },
         },
         required: [],
@@ -264,7 +264,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           authType:  { type: 'string',  enum: ['password', 'key', 'none'], description: 'Authentication type (default: password).' },
           password:  { type: 'string',  description: 'Password (stored in plaintext, same as existing profiles).' },
           pemFile:   { type: 'string',  description: 'Absolute path to an identity file (.pem/.key) on the Mac.' },
-          tags:      { type: 'array',   items: { type: 'string' }, description: 'Tags for grouping (e.g. ["ai"] to show in list_profiles).' },
+          tags:      { type: 'array',   items: { type: 'string' }, description: 'Tags for grouping in the sidebar, as names (e.g. ["HOME"]). They do not affect MCP access — use aiEnabled for that.' },
           aiEnabled: { type: 'boolean', description: 'Allow MCP tools to connect via this profile (default: false).' },
         },
         required: ['name'],
@@ -304,7 +304,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_profiles': {
         const profiles = await bridgeRequest('GET', '/profiles');
         if (profiles.length === 0) {
-          return textResult('No AI-accessible profiles found. Tag a profile with "ai" in Prateek-Term to make it accessible.');
+          return textResult('No AI-accessible profiles found. Turn on the AI toggle for a profile in Prateek-Term, or call add_profile with aiEnabled: true. Tagging a profile does not grant access.');
         }
         const summary = profiles.map(p =>
           `• ${p.name} [${p.protocol}] ${p.host ? `→ ${p.username ? p.username + '@' : ''}${p.host}${p.port && p.port !== 22 ? ':' + p.port : ''}` : ''}`

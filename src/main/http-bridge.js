@@ -194,12 +194,119 @@ function send(res, status, body) {
   res.end(json);
 }
 
-function validateLocalPath(localPath) {
-  const resolved = path.resolve(localPath);
-  const home = os.homedir();
-  if (!resolved.startsWith(home) && !resolved.startsWith(os.tmpdir())) {
-    return 'localPath must be within home directory or temp directory';
+/**
+ * Directories an MCP client may read from or write to. Each root is kept under
+ * both the name it is given and its realpath: on macOS os.tmpdir() is
+ * /var/folders/<...>/T while /tmp is a symlink to /private/tmp, so a path
+ * staged in /tmp matched none of them and uploads were refused outright.
+ */
+function allowedRoots() {
+  const roots = new Set();
+  // '/tmp' only where it means something: path.resolve('/tmp') on Windows is
+  // C:\tmp, which would widen the boundary to a directory anyone can create.
+  const extra = process.platform === 'win32' ? [] : ['/tmp'];
+  for (const r of [os.homedir(), os.tmpdir(), ...extra]) {
+    if (!r) continue;
+    roots.add(path.resolve(r));
+    try { roots.add(fs.realpathSync(r)); } catch { /* root absent on this OS */ }
   }
+  return [...roots];
+}
+
+/**
+ * Resolve through symlinks without requiring the path to exist — /download
+ * validates its destination before the file is created. Walks up to the
+ * deepest ancestor that does exist, resolves that, then re-appends the rest,
+ * so a symlink inside an allowed root cannot point out of it.
+ */
+function realResolve(p) {
+  let cur = path.resolve(p);
+  const tail = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync(cur);
+      return tail.length ? path.join(real, ...tail.slice().reverse()) : real;
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return path.resolve(p);   // nothing on this branch exists
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * Is this plausibly a hostname, rather than whatever else landed on the PTY?
+ * The hostname probe reads the last line of output, which on a session still
+ * sitting at an auth prompt is the prompt itself — reported to the user as
+ * `Connected to: prateek@127.0.0.1's password: (127.0.0.1)`.
+ */
+// Protocols POST /sessions knows how to launch. 'serial' is handled before
+// this check; everything else here goes through the PTY path.
+const CONNECTABLE = new Set(['ssh', 'telnet', 'ftp', 'local']);
+
+// How long a finished session's output stays readable before its buffer is
+// dropped. Without this every session ever opened kept its buffer for the life
+// of the app and list_sessions grew without bound.
+const CLOSED_GRACE_MS = 5 * 60 * 1000;
+
+/**
+ * Forget buffers whose process is gone. The grace period matters: a client
+ * commonly reads a command's output just after the session ends, so reaping on
+ * sight would throw away the very thing it wants.
+ */
+function reapClosedBuffers(now) {
+  for (const [id, entry] of outputBuffers) {
+    const live = (_terminals && _terminals.has(Number(id)))
+      || (_serialConns && _serialConns.has(id));
+    if (live) { entry.closedAt = null; continue; }      // reconnected — forget the stamp
+    if (entry.waiters && entry.waiters.length) continue; // someone is long-polling it
+    if (!entry.closedAt) { entry.closedAt = now; continue; }
+    if (now - entry.closedAt > CLOSED_GRACE_MS) outputBuffers.delete(id);
+  }
+}
+
+/** Tags are {name,color} in the store — the renderer reads `t.name`/`t.color`. */
+function normalizeTags(tags) {
+  const list = Array.isArray(tags) ? tags : (tags ? [tags] : []);
+  const out = [];
+  for (const t of list) {
+    if (typeof t === 'string') {
+      if (t.trim()) out.push({ name: t.trim(), color: DEFAULT_TAG_COLOR });
+    } else if (t && typeof t === 'object' && typeof t.name === 'string' && t.name.trim()) {
+      out.push({ name: t.name.trim(), color: t.color || DEFAULT_TAG_COLOR });
+    }
+    // anything else is unusable in the UI — drop it rather than store it
+  }
+  return out;
+}
+
+// Matches the renderer's own fallback (app.js: `tag.color || '#6c7086'`).
+const DEFAULT_TAG_COLOR = '#6c7086';
+
+function looksLikeHostname(s) {
+  const h = String(s || '').trim();
+  if (!h || h.length > 253) return false;          // RFC 1035 ceiling
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(h);   // no spaces, @, ', or :
+}
+
+function validateLocalPath(localPath) {
+  // Reject '..' outright. path.resolve() collapses `link/..` LEXICALLY, before
+  // realpath can see it, so a symlink inside an allowed root followed by '..'
+  // was judged on a path that never existed while scp — handed the original
+  // string — followed the link and read the real target. A client has no need
+  // for '..' in an absolute path, so refusing is both safe and simple.
+  const raw = String(localPath || '');
+  if (raw.split(/[\\/]+/).includes('..')) {
+    return 'localPath must not contain ".."';
+  }
+  const resolved = realResolve(localPath);
+  // Compare on a path boundary: a bare startsWith also accepted a sibling
+  // directory whose name merely began with the home path (…/prateek-evil).
+  const inRoot = allowedRoots().some(
+    (r) => resolved === r || resolved.startsWith(r + path.sep),
+  );
+  if (!inRoot) return 'localPath must be within your home directory or a temp directory';
   return null;
 }
 
@@ -358,9 +465,15 @@ async function handleRequest(req, res) {
 
   // ── GET /sessions ─────────────────────────────────────────────────────
   if (req.method === 'GET' && url === '/sessions') {
+    reapClosedBuffers(Date.now());
     const sessions = [];
     for (const [id] of outputBuffers) {
-      sessions.push({ id, type: _terminals.has(Number(id)) ? 'pty' : 'serial' });
+      // 'serial' used to be the catch-all for "not a pty", so a closed SSH
+      // session was reported as a serial port. Name what it actually is.
+      const type = _terminals.has(Number(id)) ? 'pty'
+        : (_serialConns && _serialConns.has(id)) ? 'serial'
+          : 'closed';
+      sessions.push({ id, type });
     }
     return send(res, 200, sessions);
   }
@@ -388,9 +501,41 @@ async function handleRequest(req, res) {
           if (!profile) return send(res, 404, { error: `Profile '${body.profileName}' not found` });
           // Security: only AI-enabled profiles
           if (!profile.aiEnabled) return send(res, 403, { error: 'Profile does not have AI/MCP access enabled' });
+
+          // A serial profile cannot be opened by the PTY path at all. It used
+          // to fall through buildSSHCommandForProfile's `default:` branch and
+          // come back as `bash -l` — the reported bug, reached through a saved
+          // profile instead of a missing name. Open the port it names.
+          if (profile.protocol === 'serial') {
+            const sres = await _serialConnect({
+              port: profile.serialPort, baudRate: profile.baudRate || 115200,
+              dataBits: profile.dataBits || 8, stopBits: profile.stopBits || 1,
+              parity: profile.parity || 'none',
+            });
+            ensureBuf(sres.id);
+            return send(res, 201, { id: sres.id, protocol: 'serial', port: profile.serialPort });
+          }
+          // Anything we have no launcher for must be an error. Falling through
+          // to a local shell is what made the original failure invisible.
+          if (!CONNECTABLE.has(String(profile.protocol || '').toLowerCase())) {
+            return send(res, 400, {
+              error: `Profile '${profile.name}' has protocol '${profile.protocol}', which cannot be opened.`,
+            });
+          }
         } else {
+          // No profileName. Previously this defaulted to protocol 'local' and
+          // quietly handed back a local shell — so a client that simply omitted
+          // profileName got a macOS login shell presented as a successful
+          // connect, with no host, no protocol and no warning. Opening a local
+          // shell is legitimate, but only when it was actually asked for.
+          if (!body.protocol) {
+            return send(res, 400, {
+              error: 'Specify profileName to connect via a saved profile, '
+                   + "or protocol (e.g. 'local') for an inline connection.",
+            });
+          }
           // Inline profile — no credentials accepted from MCP clients
-          profile = { protocol: body.protocol || 'local', host: body.host, username: body.username, port: body.port };
+          profile = { protocol: body.protocol, host: body.host, username: body.username, port: body.port };
         }
         const cmdInfo = await _connectProfile(profile);
         const result  = await _spawnPty({
@@ -430,6 +575,15 @@ async function handleRequest(req, res) {
             _writeInput(sessionId, wrapped);
             const hostResult = await waitForDone(sessionId, marker, 5000);
             const remoteHost = hostResult.output.trim().split('\n').pop().trim();
+            // Anything that is not a hostname means the probe did not run — the
+            // session is probably still at an auth prompt. Say "unverified"
+            // rather than presenting the captured text as the host.
+            if (!looksLikeHostname(remoteHost)) {
+              return send(res, 201, {
+                id: sessionId, host: profile.host, protocol: profile.protocol,
+                warning: 'Could not verify remote hostname',
+              });
+            }
             // Detect if we're still on the local machine (SSH may have failed silently)
             const localHostname = os.hostname();
             if (remoteHost === localHostname || remoteHost.startsWith(localHostname.split('.')[0])) {
@@ -599,7 +753,7 @@ async function handleRequest(req, res) {
       authType:  authType || 'password',
       password:  password || null,
       pemFile:   pemFile  || null,
-      tags:      Array.isArray(tags) ? tags : (tags ? [tags] : []),
+      tags:      normalizeTags(tags),
       aiEnabled: Boolean(aiEnabled),
     };
 
@@ -739,4 +893,7 @@ function isRunning() {
 function getPort() { return _port; }
 function getToken() { return _token; }
 
-module.exports = { start, stop, isRunning, getPort, getToken, appendOutput, ensureBuf };
+module.exports = {
+  start, stop, isRunning, getPort, getToken, appendOutput, ensureBuf,
+  validateLocalPath, looksLikeHostname, reapClosedBuffers, normalizeTags,
+};
