@@ -50,7 +50,10 @@ const {
 // Per-OS resolvers (shell, browser/binary discovery, config paths, agent socket).
 const platform = require('./platform');
 const { redactSecrets } = require('./redact');
+const { isSafeExternalUrl } = require('./external-links');
+const browsers = require('./browsers');
 const { checkDependencies } = require('./dependencies');
+const { createHandoff } = require('./pty-handoff');
 const { runHealthChecks } = require('./health-checks');
 
 // Startup self-check: which external CLI tools are present and new enough, plus
@@ -469,6 +472,13 @@ function installQuickActionIfNeeded() {
 let mainWindow;
 const terminals = new Map();
 const terminalOwners = new Map(); // ptyId -> webContents
+// Output held while a torn-off tab's PTY moves between windows. The old window
+// drops the tab the moment the new one is requested, but the new window cannot
+// adopt until its renderer has booted — 2.7s on a real tear-off. See pty-handoff.js.
+const handoff = createHandoff();
+// webContents objects cannot be read once their window has closed, so track the
+// owning window's id separately — that is what close-cleanup matches against.
+const terminalOwnerIds = new Map(); // ptyId -> webContents.id
 let terminalIdCounter = 0;
 const scpTransfers = new Map();
 let scpTransferId = 0;
@@ -514,6 +524,71 @@ function appIconPath() {
 // New Window, prateekterm://…target=window). Secondary windows must NOT restore
 // the saved session — otherwise a torn-off tab reopens the entire previous
 // session on top of itself. Signalled to the renderer via ?secondary=1.
+/**
+ * Send every link in `win` to the OS default browser.
+ *
+ * Without this, xterm's link handler calls window.open and Electron opens a new
+ * in-app BrowserWindow — a second browser with no URL bar, no extensions and no
+ * saved logins. Every window gets this: one unrouted window reopens the hole.
+ */
+/**
+ * Open `url` in the browser the user chose, or the OS default.
+ *
+ * Every link path funnels through here — the terminal's own handler, a stray
+ * window.open, and an attempted navigation — so the scheme check and the
+ * browser preference can never disagree between them.
+ *
+ * Returns false only when the URL itself was refused.
+ */
+function openLinkExternally(url) {
+  if (!isSafeExternalUrl(url)) {
+    dbgLog(`[links] refused unsafe URL: ${String(url).slice(0, 80)}`);
+    return false;
+  }
+  const chosen = loadSettings().linkBrowser || '';
+  if (chosen) {
+    const match = browsers.listBrowsers().find((b) => b.id === chosen);
+    const cmd = browsers.openCommand(match, url);
+    if (cmd) {
+      try {
+        // spawn with an argv array — never a shell. The URL is remote-device
+        // output, so building a shell string here would be command injection.
+        const child = spawn(cmd.command, cmd.args, { detached: true, stdio: 'ignore' });
+        child.unref();
+        dbgLog(`[links] opened in ${chosen}`);
+        return true;
+      } catch (e) {
+        dbgLog(`[links] ${chosen} failed to launch (${e.message}) — using the OS default`);
+      }
+    } else {
+      dbgLog(`[links] chosen browser '${chosen}' is not installed — using the OS default`);
+    }
+  }
+  shell.openExternal(url);
+  return true;
+}
+
+function routeLinksToDefaultBrowser(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openLinkExternally(url);
+    return { action: 'deny' };   // never open a browser of our own
+  });
+
+  // A link must not be able to navigate the app frame away from its own page.
+  // In-page anchors (the user guide's contents list) keep working: they differ
+  // from the current URL only by hash.
+  win.webContents.on('will-navigate', (event, url) => {
+    const current = win.webContents.getURL();
+    const sameDoc = (a, b) => {
+      try { const x = new URL(a), y = new URL(b); x.hash = ''; y.hash = ''; return x.href === y.href; }
+      catch { return a === b; }
+    };
+    if (sameDoc(url, current)) return;
+    event.preventDefault();
+    openLinkExternally(url);
+  });
+}
+
 function createNewWindow(opts = {}) {
   const { nativeImage } = require('electron');
   const iconPath = appIconPath();
@@ -539,6 +614,7 @@ function createNewWindow(opts = {}) {
       nodeIntegration: false,
     },
   });
+  routeLinksToDefaultBrowser(win);
   win.loadFile(
     path.join(__dirname, '..', 'renderer', 'index.html'),
     opts.secondary ? { query: { secondary: '1' } } : undefined,
@@ -555,18 +631,37 @@ function createNewWindow(opts = {}) {
   win.webContents.on('before-input-event', (event, input) => {
     if ((input.meta && input.key === 'r') || input.key === 'F5') event.preventDefault();
   });
+
+  // Captured now: webContents is unreadable by the time 'closed' fires.
+  const wcId = win.webContents.id;
+  win.on('closed', () => closeWindowTerminals(wcId));
+
   return win;
+}
+
+/**
+ * Tear down only what the closing window owned.
+ *
+ * This used to kill every PTY in the process, so closing the first window
+ * SIGHUP'd the shell in every torn-off window and every MCP bridge session.
+ * A PTY mid-tear-off has no owner, so no window's close can claim it.
+ * app.on('window-all-closed') quits the app, which is what reaps the rest.
+ */
+function closeWindowTerminals(wcId) {
+  for (const [id, term] of terminals) {
+    if (terminalOwnerIds.get(id) !== wcId) continue;
+    term.kill();
+    terminals.delete(id);
+    terminalOwners.delete(id);
+    terminalOwnerIds.delete(id);
+    handoff.discard(id);
+  }
+  pendingAutoConnect.delete(wcId);
 }
 
 function createWindow() {
   mainWindow = createNewWindow();
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    for (const [_id, term] of terminals) term.kill();
-    terminals.clear();
-    for (const [_id, proc] of scpTransfers) proc.kill();
-    scpTransfers.clear();
-  });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 app.whenReady().then(() => {
@@ -719,6 +814,16 @@ app.whenReady().then(() => {
   setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL);
 });
 
+// Per-window close only reaps that window's PTYs (see closeWindowTerminals).
+// Anything still running at quit — a PTY mid-tear-off with no owner, an scp
+// transfer — is reaped here so nothing outlives the app.
+app.on('will-quit', () => {
+  for (const [, term] of terminals) { try { term.kill(); } catch { /* already gone */ } }
+  terminals.clear();
+  for (const [, proc] of scpTransfers) { try { proc.kill(); } catch { /* already gone */ } }
+  scpTransfers.clear();
+});
+
 app.on('window-all-closed', () => {
   app.quit();
 });
@@ -825,6 +930,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
 
   terminals.set(id, term);
   terminalOwners.set(id, ownerContents);
+  terminalOwnerIds.set(id, ownerContents.id);
   // UI-spawned PTYs are NOT auto-registered with the MCP bridge. Sharing a
   // live user terminal with AI clients means the AI writes to the same PTY
   // the user is typing in — sentinel markers (MTERM_DONE_…) leak into the
@@ -832,6 +938,9 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   // spawn their own session via `connect` (which registers its own buffer).
 
   term.onData((data) => {
+    // Mid-tear-off this PTY has no window to render into. Hold the output
+    // rather than sending it to the window that just let go of the tab.
+    if (handoff.hold(id, data)) return;
     const owner = terminalOwners.get(id);
     if (owner && !owner.isDestroyed()) {
       owner.send('terminal:data', { id, data });
@@ -847,6 +956,8 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
     const owner = terminalOwners.get(id);
     terminals.delete(id);
     terminalOwners.delete(id);
+    terminalOwnerIds.delete(id);
+    handoff.discard(id);
     // Clean up SSH_ASKPASS helper scripts written by wrapWithAskpass
     for (const f of cleanupFiles) {
       try { fs.unlinkSync(f); } catch { /* already gone */ }
@@ -872,13 +983,30 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
 
 // Re-route terminal data to the new owner window (used by tab tear-off)
 ipcMain.handle('terminal:adopt', (event, id) => {
+  // Drain the hold FIRST, even if the PTY has since died: its final output is
+  // what explains why, and dropping it leaves the new window blank.
+  const lost = handoff.overflowed(id);
+  const backlog = handoff.end(id);
+  for (const data of backlog) event.sender.send('terminal:data', { id, data });
   if (!terminals.has(id)) {
-    dbgLog(`[pty:${id}] adopt FAILED — terminal not found`);
-    return { success: false };
+    dbgLog(`[pty:${id}] adopt FAILED — terminal exited during the hand-off (replayed ${backlog.length} chunk(s))`);
+    return { success: false, lostOutput: lost };
   }
   terminalOwners.set(id, event.sender);
-  dbgLog(`[pty:${id}] adopted by new window`);
-  return { success: true };
+  terminalOwnerIds.set(id, event.sender.id);
+  dbgLog(`[pty:${id}] adopted by new window (replayed ${backlog.length} held chunk(s)${lost ? ', some output was dropped' : ''})`);
+  return { success: true, lostOutput: lost };
+});
+
+// The old window has let go of a torn-off tab. Hold the PTY's output until the
+// new window adopts it; without this the gap between the two is a black hole,
+// and a full-screen app (screen/tmux/vim) never resends what it lost.
+ipcMain.on('terminal:release', (event, { id }) => {
+  if (!terminals.has(id)) return;
+  handoff.begin(id);
+  terminalOwners.delete(id);
+  terminalOwnerIds.delete(id);
+  dbgLog(`[pty:${id}] released by old window — holding output until adopted`);
 });
 
 ipcMain.on('terminal:input', (event, { id, data }) => {
@@ -1376,6 +1504,7 @@ function openUserGuide() {
   const guidePath = app.isPackaged
     ? path.join(process.resourcesPath, 'docs', 'user-guide.html')
     : path.join(__dirname, '../../docs/user-guide.html');
+  routeLinksToDefaultBrowser(userGuideWindow);
   userGuideWindow.loadFile(guidePath, { query: { v: app.getVersion() } });
   userGuideWindow.on('closed', () => { userGuideWindow = null; });
 }
@@ -1450,6 +1579,7 @@ ipcMain.handle('help:open', () => {
       nodeIntegration: false,
     },
   });
+  routeLinksToDefaultBrowser(helpWindow);
   // Use the canonical user-guide.html — single source of truth for all docs.
   const guidePath = app.isPackaged
     ? path.join(process.resourcesPath, 'docs', 'user-guide.html')
@@ -1537,6 +1667,20 @@ ipcMain.on(   'update:open-url',     (_, url)  => {
     }
   } catch { /* invalid URL — ignore */ }
 });
+
+// Terminal link clicks. Validated here, not in the renderer: the renderer is
+// the side rendering untrusted remote output, so it is not the side that gets
+// to decide what the OS is allowed to launch.
+ipcMain.handle('shell:openExternal', (_event, url) => {
+  // Validated in main, not the renderer: the renderer is the side rendering
+  // untrusted remote output, so it is not the side that decides what launches.
+  if (!openLinkExternally(url)) return { ok: false, reason: 'unsupported-scheme' };
+  return { ok: true };
+});
+
+// Browsers the user can pick between in Settings. '' (system default) is added
+// by the renderer; this reports only what is actually installed.
+ipcMain.handle('browsers:list', () => ({ browsers: browsers.listBrowsers() }));
 
 ipcMain.handle('dialog:openFile', async (event, options = {}) => {
   const result = await dialog.showOpenDialog(mainWindow, {

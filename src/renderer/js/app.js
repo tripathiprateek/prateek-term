@@ -747,7 +747,11 @@ function createTerminalInstance() {
   });
 
   const fitAddon = new FitAddon.FitAddon();
-  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+  // Hand clicks to the OS default browser. Without a handler the addon falls
+  // back to window.open(), which Electron turns into an in-app BrowserWindow.
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon((event, uri) => {
+    window.terminalAPI.openExternal(uri);
+  });
   const searchAddon = new SearchAddon.SearchAddon();
 
   term.loadAddon(fitAddon);
@@ -812,6 +816,135 @@ function buildPasswordQueue(cp) {
     q.push({ who: who(cp.username, cp.host), password: cp.password, kind: 'target' });
   }
   return q;
+}
+
+/**
+ * Parse OSC 7 — the standard shell-to-terminal cwd report:
+ *   ESC ] 7 ; file://hostname/absolute/path ESC \
+ * zsh/fish emit it by default; bash/sh need PROMPT_COMMAND (auto-injected for
+ * SSH tabs after connect). The parsed path is the SCP drag-drop destination.
+ *
+ * Must be registered BEFORE any output reaches the terminal: an unhandled OSC 7
+ * is echoed to the screen as raw text, and the cwd it carried is lost.
+ */
+function registerRemoteCwdParser(tab) {
+  tab.term.parser.registerOscHandler(7, (data) => {
+    try {
+      // data = "file://hostname/absolute/path" (hostname optional)
+      const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
+      if (m) tab._remoteCwd = decodeURIComponent(m[1]);
+    } catch { /* ignore malformed OSC 7 payload */ }
+    return true; // mark handled so xterm doesn't echo it
+  });
+}
+
+/**
+ * Wire the interactions every terminal tab needs, whichever way it was built.
+ *
+ * createTab() and adoptTab() (tab tear-off) both produce a tab, and this block
+ * used to live in createTab alone — so a torn-off tab silently lost its
+ * right-click menu, middle-click paste, select-to-copy and drag-drop upload.
+ * One call site each is what keeps them from drifting apart again.
+ *
+ * Deliberately NOT here: term.attachCustomKeyEventHandler. xterm keeps only one
+ * such handler, and the serial path needs a different one — it relies on xterm's
+ * native paste reaching term.onData, so it must not return false on Cmd/Ctrl+V.
+ *
+ * Call AFTER tab.ptyId is set: the local cwd poller is skipped without it.
+ */
+function wireTabInteractions(tab) {
+  const { term, pane } = tab;
+
+  // Drag-and-drop file upload for SSH tabs
+  setupPaneDragDrop(pane, tab);
+
+  // For local terminals: update tab name to current directory.
+  // Trigger check 500ms after user presses Enter (cwd only changes on command).
+  if (tab.protocol === 'local' && tab.ptyId) {
+    const checkCwd = async () => {
+      if (!tab.ptyId || tab._cwdPollStopped) return;
+      try {
+        const cwd = await window.terminalAPI.getRemoteCwd(tab.ptyId);
+        if (cwd) {
+          tab._cwdPath = cwd;  // full path → persisted for session restore
+          const parts = cwd.split('/').filter(Boolean);
+          const dirName = parts.pop() || '/';
+          if (dirName !== tab._lastCwd) {
+            tab._lastCwd = dirName;
+            tab.name = dirName;
+            const tabEl = document.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+            if (tabEl) {
+              const titleEl = tabEl.querySelector('.tab-title');
+              if (titleEl) titleEl.textContent = dirName;
+            }
+          }
+        }
+      } catch { /* ignore probe errors */ }
+    };
+
+    let cwdDebounce = null;
+    tab._cwdEnterListener = term.onData((data) => {
+      if (data === '\r' || data === '\n') {
+        clearTimeout(cwdDebounce);
+        cwdDebounce = setTimeout(checkCwd, 500);
+      }
+    });
+
+    // Expose checkCwd so scheduleCwdRestore can trigger a post-cd name refresh.
+    tab._checkCwd = checkCwd;
+
+    // Proactive first probe: populate `_cwdPath` shortly after spawn so a quit
+    // before the user ever presses Enter still persists a real path. Without
+    // this, freshly-restored tabs saved `cwd: null` → next launch lands in $HOME.
+    //
+    // The handle is stored on the tab so scheduleCwdRestore can cancel it —
+    // if a CWD restore is pending the probe would fire BEFORE the `cd` completes
+    // and overwrite the tab name with the home-dir name (wrong).
+    tab._cwdProbeTimer = setTimeout(checkCwd, 600);
+  }
+
+  // Auto-copy on selection (PuTTY / Linux terminal style)
+  term.onSelectionChange(() => {
+    const sel = term.getSelection();
+    if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+  });
+
+  // Right-click: always show context menu
+  pane.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTerminalContextMenu(e.clientX, e.clientY, term, tab);
+  });
+
+  // Linux: Chromium natively pastes the X11 PRIMARY selection into xterm's
+  // textarea on middle-click. Combined with our clipboard paste below that
+  // yields a DOUBLE paste. Cancel the middle-button mousedown (its default
+  // action is the native paste) so only our handler runs. Capture phase +
+  // preventDefault only — never stopPropagation, so xterm still sees the event
+  // for mouse-reporting apps (vim/tmux).
+  if (window.terminalAPI && window.terminalAPI.platform === 'linux') {
+    pane.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    }, true);
+  }
+
+  // Middle-click: paste clipboard (PuTTY / Linux terminal style)
+  pane.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    navigator.clipboard.readText().then((text) => {
+      if (!text) return;
+      if (tab.isSerial && tab.serialId) {
+        window.terminalAPI.serialWrite(tab.serialId, text);
+      } else if (tab.ptyId) {
+        // Use term.paste() so bracketed paste mode is respected — this tells
+        // the shell to treat the content as a single paste block rather than
+        // individual keystrokes, preventing garbled multi-line content.
+        term.paste(text);
+      }
+    }).catch(() => {});
+  });
+
 }
 
 async function createTab(options = {}) {
@@ -892,18 +1025,7 @@ async function createTab(options = {}) {
     _cwdPath: null,
   };
 
-  // OSC 7 — standard shell-to-terminal cwd reporting. Shells emit:
-  //   ESC ] 7 ; file://hostname/absolute/path ESC \
-  // zsh/fish emit this by default; bash/sh need PROMPT_COMMAND (auto-injected
-  // for SSH tabs after connect). Parsed path is used as SCP drag-drop destination.
-  term.parser.registerOscHandler(7, (data) => {
-    try {
-      // data = "file://hostname/absolute/path" (hostname optional)
-      const m = /^file:\/\/[^/]*(\/.*)$/.exec(data);
-      if (m) tab._remoteCwd = decodeURIComponent(m[1]);
-    } catch { /* ignore malformed OSC 7 payload */ }
-    return true; // mark handled so xterm doesn't echo it
-  });
+  registerRemoteCwdParser(tab);
 
   if (isSerial) {
     // --- Serial path ---
@@ -1145,95 +1267,7 @@ async function createTab(options = {}) {
   resizeObserver.observe(pane);
   tab.resizeObserver = resizeObserver;
 
-  // Drag-and-drop file upload for SSH tabs
-  setupPaneDragDrop(pane, tab);
-
-  // For local terminals: update tab name to current directory.
-  // Trigger check 500ms after user presses Enter (cwd only changes on command).
-  if (protocol === 'local' && tab.ptyId) {
-    const checkCwd = async () => {
-      if (!tab.ptyId || tab._cwdPollStopped) return;
-      try {
-        const cwd = await window.terminalAPI.getRemoteCwd(tab.ptyId);
-        if (cwd) {
-          tab._cwdPath = cwd;  // full path → persisted for session restore
-          const parts = cwd.split('/').filter(Boolean);
-          const dirName = parts.pop() || '/';
-          if (dirName !== tab._lastCwd) {
-            tab._lastCwd = dirName;
-            tab.name = dirName;
-            const tabEl = document.querySelector(`.tab[data-tab-id="${tab.id}"]`);
-            if (tabEl) {
-              const titleEl = tabEl.querySelector('.tab-title');
-              if (titleEl) titleEl.textContent = dirName;
-            }
-          }
-        }
-      } catch { /* ignore probe errors */ }
-    };
-
-    let cwdDebounce = null;
-    tab._cwdEnterListener = term.onData((data) => {
-      if (data === '\r' || data === '\n') {
-        clearTimeout(cwdDebounce);
-        cwdDebounce = setTimeout(checkCwd, 500);
-      }
-    });
-
-    // Expose checkCwd so scheduleCwdRestore can trigger a post-cd name refresh.
-    tab._checkCwd = checkCwd;
-
-    // Proactive first probe: populate `_cwdPath` shortly after spawn so a quit
-    // before the user ever presses Enter still persists a real path. Without
-    // this, freshly-restored tabs saved `cwd: null` → next launch lands in $HOME.
-    //
-    // The handle is stored on the tab so scheduleCwdRestore can cancel it —
-    // if a CWD restore is pending the probe would fire BEFORE the `cd` completes
-    // and overwrite the tab name with the home-dir name (wrong).
-    tab._cwdProbeTimer = setTimeout(checkCwd, 600);
-  }
-
-  // Auto-copy on selection (PuTTY / Linux terminal style)
-  term.onSelectionChange(() => {
-    const sel = term.getSelection();
-    if (sel) navigator.clipboard.writeText(sel).catch(() => {});
-  });
-
-  // Right-click: always show context menu
-  pane.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    showTerminalContextMenu(e.clientX, e.clientY, term, tab);
-  });
-
-  // Linux: Chromium natively pastes the X11 PRIMARY selection into xterm's
-  // textarea on middle-click. Combined with our clipboard paste below that
-  // yields a DOUBLE paste. Cancel the middle-button mousedown (its default
-  // action is the native paste) so only our handler runs. Capture phase +
-  // preventDefault only — never stopPropagation, so xterm still sees the event
-  // for mouse-reporting apps (vim/tmux).
-  if (window.terminalAPI && window.terminalAPI.platform === 'linux') {
-    pane.addEventListener('mousedown', (e) => {
-      if (e.button === 1) e.preventDefault();
-    }, true);
-  }
-
-  // Middle-click: paste clipboard (PuTTY / Linux terminal style)
-  pane.addEventListener('auxclick', (e) => {
-    if (e.button !== 1) return;
-    e.preventDefault();
-    navigator.clipboard.readText().then((text) => {
-      if (!text) return;
-      if (tab.isSerial && tab.serialId) {
-        window.terminalAPI.serialWrite(tab.serialId, text);
-      } else if (tab.ptyId) {
-        // Use term.paste() so bracketed paste mode is respected — this tells
-        // the shell to treat the content as a single paste block rather than
-        // individual keystrokes, preventing garbled multi-line content.
-        term.paste(text);
-      }
-    }).catch(() => {});
-  });
+  wireTabInteractions(tab);
 
   return tab;
 }
@@ -1679,6 +1713,11 @@ function renderTab(tab, parentEl = null) {
       if (tearOff) {
         ev.stopPropagation();
         ev.preventDefault();
+        // A serial tab is held by serialId, not ptyId, and nothing on this path
+        // hands the port over: the new window would re-connect with an undefined
+        // port while detachTab disposed the tab without closing the old one,
+        // leaving the port OS-locked until app quit. Refuse instead.
+        if (tab.isSerial) return;
         // Serialize the terminal buffer so the new window can replay history.
         // SerializeAddon preserves ANSI colors/styles — requires the addon to be loaded.
         let serializedBuffer = '';
@@ -1864,6 +1903,12 @@ function detachTab(tabId) {
     window.terminalAPI.logStop(tab.logId);
     tab.logId = null;
   }
+  // Hand the PTY back to main BEFORE tearing the tab down. Main holds its
+  // output until the new window adopts it; otherwise everything the PTY emits
+  // in that gap is delivered here, to a tab that no longer exists, and lost.
+  // A full-screen app (screen/tmux/vim) only sends deltas and never resends
+  // them, so one lost chunk freezes the new window on a stale frame.
+  if (tab.ptyId) window.terminalAPI.releaseTerminal(tab.ptyId);
   // Clear ptyId so no more input is sent, but do NOT kill — new window adopts it
   tab.ptyId = null;
 
@@ -3235,6 +3280,10 @@ async function adoptTab(tearOffData) {
     _filterRegex: null,
   };
 
+  // Before any output is written: the snapshot can itself carry the OSC 7
+  // report, which recovers the remote cwd for SCP drops.
+  registerRemoteCwdParser(tab);
+
   // Replay serialized buffer so history is preserved in the new window
   if (tearOffData.serializedBuffer) {
     try {
@@ -3242,8 +3291,22 @@ async function adoptTab(tearOffData) {
     } catch { /* ignore replay errors */ }
   }
 
-  // Take ownership of the PTY — main process will now route data here
-  await window.terminalAPI.adoptTerminal(ptyId);
+  // Take ownership of the PTY — main process now routes data here and
+  // replays anything it held while the PTY had no window.
+  const adopted = await window.terminalAPI.adoptTerminal(ptyId);
+
+  // The PTY can be gone by now — it may have exited during the hand-off, or the
+  // tab may already have been sitting on an exit banner when it was dragged.
+  // Main has still replayed its dying output, so show the tab with its exit
+  // state rather than one that looks alive but silently drops every keystroke.
+  if (!adopted || !adopted.success) {
+    tab.ptyId = null;
+    state.tabs.push(tab);
+    renderTabBar();
+    activateTab(tabId);
+    showExitMessage(tab, null);
+    return;
+  }
 
   // Wire input
   term.onData((data) => {
@@ -3271,6 +3334,22 @@ async function adoptTab(tearOffData) {
     window.terminalAPI.resizeTerminal(ptyId, proposed.cols, proposed.rows);
   }
 
+  // Normally nothing is lost: main held the PTY's output across the hand-off
+  // and replayed it on top of the snapshot, so the screen already matches what
+  // the remote app thinks it drew. Only if that hold overflowed is a repaint
+  // needed — and a full-screen app (screen/tmux/vim) repaints on SIGWINCH,
+  // which the kernel raises only when the size actually CHANGES.
+  //
+  // Measured against a real `screen`: resizing to the same size emits nothing,
+  // and two resizes back-to-back are coalesced into a single SIGWINCH that
+  // also sees no net change. The restore has to be delayed to land as its own
+  // signal — 50ms was enough, 80ms for margin.
+  if (adopted && adopted.lostOutput && proposed && proposed.cols > 0) {
+    const { cols, rows } = proposed;
+    window.terminalAPI.resizeTerminal(ptyId, cols, Math.max(1, rows - 1));
+    setTimeout(() => window.terminalAPI.resizeTerminal(ptyId, cols, rows), 80);
+  }
+
   state.tabs.push(tab);
   flushPendingTerminalEvents(tab);
   renderTabBar();  // Render all tabs in groups
@@ -3288,6 +3367,8 @@ async function adoptTab(tearOffData) {
   });
   resizeObserver.observe(pane);
   tab.resizeObserver = resizeObserver;
+
+  wireTabInteractions(tab);
 
   term.writeln('\x1b[90m[session moved to this window]\x1b[0m');
 }
@@ -5048,6 +5129,7 @@ const DEFAULT_MCP_PORT = 29419;
 let settingsState = {
   profilesPath: '',
   defaultShell: '',        // '' → follow the system default ($SHELL)
+  linkBrowser: '',         // '' → follow the OS default browser
   updateChannel: 'auto',   // auto → RCs only if this build is itself an RC
   theme: 'catppuccin-mocha',
   debugLogging: false,
@@ -5201,6 +5283,29 @@ async function populateShellPicker(current) {
   el.value = current || '';
 }
 
+/**
+ * Offer only browsers actually installed on this machine. A previously-chosen
+ * browser that has since been uninstalled is kept in the list (marked) rather
+ * than silently reset, so the setting does not change behind the user's back —
+ * main falls back to the OS default for it either way.
+ */
+async function populateBrowserPicker(current) {
+  const el = document.getElementById('settings-link-browser');
+  if (!el) return;
+  let installed = [];
+  try {
+    const r = await window.terminalAPI.listBrowsers();
+    installed = (r && r.browsers) || [];
+  } catch { /* keep the System default option only */ }
+  const opts = installed.map((b) => ({ id: b.id, label: b.name }));
+  if (current && !opts.some((o) => o.id === current)) {
+    opts.unshift({ id: current, label: `${current} (not installed)` });
+  }
+  el.innerHTML = '<option value="">System default</option>'
+    + opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join('');
+  el.value = current || '';
+}
+
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   const s = await window.terminalAPI.loadSettings();
@@ -5215,10 +5320,12 @@ async function openSettings() {
     logRotateMaxFiles: 5,
     sidebarCollapsed: false,
     defaultShell: '',
+    linkBrowser: '',
     updateChannel: 'auto',
     ...s,
   };
   await populateShellPicker(settingsState.defaultShell);
+  await populateBrowserPicker(settingsState.linkBrowser);
   const chanEl = document.getElementById('settings-update-channel');
   if (chanEl) chanEl.value = settingsState.updateChannel || 'auto';
   // Populate rotation inputs
@@ -5470,6 +5577,8 @@ async function saveSettings() {
 
   const shellEl = document.getElementById('settings-default-shell');
   if (shellEl) settingsState.defaultShell = shellEl.value || '';
+  const browserEl = document.getElementById('settings-link-browser');
+  if (browserEl) settingsState.linkBrowser = browserEl.value || '';
   const chanEl = document.getElementById('settings-update-channel');
   if (chanEl) settingsState.updateChannel = chanEl.value || 'auto';
 

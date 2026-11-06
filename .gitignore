@@ -16,3 +16,9 @@ graphify-out/
 docs/marketing/
 docs/linux-port-diagram.html
 CLAUDE.md
+
+# Agent instructions and session transcripts. .agents/ archives raw conversation
+# JSONL — it is hundreds of MB and contains pasted credentials, private keys and
+# sshpass command lines. Local-only; never commit.
+AGENTS.md
+.agents/

@@ -75,13 +75,13 @@ describe('Tab tear-off drag (BUG-008)', () => {
     // addEventListener. The variable definition and the call may be ~15 lines apart.
     // Accept either inline or variable-based pattern.
     const hasInline   = /addEventListener\('mousemove'[\s\S]{0,200}capture:\s*true/.test(appSource);
-    const hasVariable = /capture:\s*true[\s\S]{0,4000}addEventListener\('mousemove'/.test(appSource);
+    const hasVariable = /capture:\s*true[\s\S]{0,6000}addEventListener\('mousemove'/.test(appSource);
     expect(hasInline || hasVariable).toBe(true);
   });
 
   test('uses capture: true on document mouseup listener', () => {
     const hasInline   = /addEventListener\('mouseup'[\s\S]{0,200}capture:\s*true/.test(appSource);
-    const hasVariable = /capture:\s*true[\s\S]{0,4000}addEventListener\('mouseup'/.test(appSource);
+    const hasVariable = /capture:\s*true[\s\S]{0,6000}addEventListener\('mouseup'/.test(appSource);
     expect(hasInline || hasVariable).toBe(true);
   });
 
@@ -250,5 +250,132 @@ describe('OSC cwd injection input-gating', () => {
     expect(watcher[0]).toContain('sendOscPhase2(tab)');
     // …with a fallback so a shell we cannot parse still gets set up.
     expect(appSource).toMatch(/_oscPhase2Timer = setTimeout\(\(\) => sendOscPhase2\(tab\), \d+\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tearing off a tab running a full-screen app (screen/tmux/vim) left the new
+// window frozen on a stale frame.
+//
+// The old window disposes the tab as soon as the new window is REQUESTED, but
+// the new window cannot adopt the PTY until its renderer has booted. A real
+// tear-off measured 2.7s between the two:
+//     16:28:54.297  [window] open-new
+//     16:28:56.966  [pty:4] adopted by new window
+// Output in that gap went to the old window, which had no tab for that ptyId,
+// and was dropped. An idle shell emits nothing, so plain tabs looked fine;
+// screen sends only incremental updates and never resends them.
+// ---------------------------------------------------------------------------
+describe('Tear-off hand-off preserves output emitted during the gap', () => {
+  test('the old window releases the PTY to main before tearing the tab down', () => {
+    const fn = appSource.match(/function detachTab\(tabId\)[\s\S]{0,2500}?\n}/);
+    expect(fn).not.toBeNull();
+    expect(fn[0]).toContain('releaseTerminal');
+    // Must run BEFORE ptyId is cleared, or the id to release is already gone.
+    expect(fn[0].indexOf('releaseTerminal'))
+      .toBeLessThan(fn[0].indexOf('tab.ptyId = null'));
+  });
+
+  test('main holds the output instead of sending it to the window that let go', () => {
+    expect(mainSource).toContain("ipcMain.on('terminal:release'");
+    const onData = mainSource.match(/term\.onData\(\(data\) => \{[\s\S]{0,600}?\n  \}\);/);
+    expect(onData).not.toBeNull();
+    // The hold must short-circuit BEFORE the owner lookup.
+    expect(onData[0]).toMatch(/handoff\.hold\(id, data\)[\s\S]{0,40}return/);
+    expect(onData[0].indexOf('handoff.hold'))
+      .toBeLessThan(onData[0].indexOf('terminalOwners.get'));
+  });
+
+  test('the adopting window is sent the held backlog', () => {
+    const adopt = mainSource.match(/ipcMain\.handle\('terminal:adopt'[\s\S]{0,900}?\n}\);/);
+    expect(adopt).not.toBeNull();
+    expect(adopt[0]).toContain('handoff.end(id)');
+    expect(adopt[0]).toMatch(/send\('terminal:data'/);
+  });
+
+  test('a PTY that exits mid-hand-off does not leave its buffer held', () => {
+    const onExit = mainSource.match(/term\.onExit\(\(\{ exitCode, signal \}\)[\s\S]{0,700}?\n  \}\);/);
+    expect(onExit).not.toBeNull();
+    expect(onExit[0]).toContain('handoff.discard(id)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A full-screen app repaints on SIGWINCH, and the kernel raises SIGWINCH only
+// when the winsize actually CHANGES. Measured on macOS against a real `screen`:
+//     resize to the SAME size        ->   0 bytes  (no repaint)
+//     two resizes BACK-TO-BACK       ->   0 bytes  (coalesced into one signal
+//                                                   that sees no net change)
+//     nudge with a 50ms gap          ->  37 bytes  (repainted)
+// So a repaint must be two separately-delivered signals, not two calls in a row.
+// ---------------------------------------------------------------------------
+describe('Adopted session repaints only when output was actually lost', () => {
+  const adoptFn = () => appSource.match(/async function adoptTab\(tearOffData\)[\s\S]{0,8000}?\n}/)[0];
+
+  test('the repaint is gated on main reporting dropped output', () => {
+    // Unconditionally resizing would make screen/tmux reflow on every tear-off
+    // for nothing: when the hold replayed cleanly the display is already correct.
+    expect(adoptFn()).toMatch(/adopted\s*&&\s*adopted\.lostOutput/);
+  });
+
+  test('main tells the adopting window whether anything was dropped', () => {
+    const adopt = mainSource.match(/ipcMain\.handle\('terminal:adopt'[\s\S]{0,900}?\n}\);/)[0];
+    expect(adopt).toContain('handoff.overflowed(id)');
+    expect(adopt).toMatch(/lostOutput/);
+  });
+
+  test('the restore is DELAYED — back-to-back resizes coalesce and never repaint', () => {
+    const fn = adoptFn();
+    expect(fn).toMatch(/setTimeout\(\(\) => window\.terminalAPI\.resizeTerminal\([^)]*\), \d+\)/);
+    // The shrink must be the immediate call and the restore the delayed one.
+    expect(fn).toMatch(/resizeTerminal\(ptyId, cols, Math\.max\(1, rows - 1\)\);\s*\n\s*setTimeout/);
+  });
+
+  test('the nudge can never ask for a zero/negative row count', () => {
+    expect(adoptFn()).toMatch(/Math\.max\(1, rows - 1\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tearing off a tab whose process had ALREADY exited produced a tab that looked
+// alive but was inert: adoptTab discarded adoptTerminal's {success:false}, wired
+// input to a dead ptyId (silently dropped by main), and replayed a scrollback
+// ending in "Press R to reconnect or any key to close" — a prompt no listener
+// backed, because the onKey that implemented it died with the old window's term.
+// ---------------------------------------------------------------------------
+describe('Adopting a PTY that is already gone', () => {
+  const adoptFn = () => appSource.match(/async function adoptTab\(tearOffData\)[\s\S]{0,9000}?\n}/)[0];
+
+  test('a failed adopt is detected, not discarded', () => {
+    expect(adoptFn()).toMatch(/adopted[\s\S]{0,40}\.success/);
+  });
+
+  test('a failed adopt clears ptyId so input is never sent to a dead PTY', () => {
+    const fn = adoptFn();
+    const guard = fn.slice(fn.indexOf('.success'));
+    expect(guard.slice(0, 400)).toMatch(/tab\.ptyId = null/);
+  });
+
+  test('a failed adopt still shows the tab, with its exit state', () => {
+    const fn = adoptFn();
+    const guard = fn.slice(fn.indexOf('.success'), fn.indexOf('.success') + 500);
+    expect(guard).toContain('showExitMessage');
+    expect(guard).toContain('state.tabs.push');   // the tab must still appear
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A serial tab has no ptyId, so tear-off fell through to a normal connect with
+// a malformed profile ("port is not defined: undefined"), while detachTab
+// disposed the tab WITHOUT calling serialClose — stranding the OS-locked port
+// until app quit, with nothing in the UI able to release it.
+// ---------------------------------------------------------------------------
+describe('Serial tabs are not torn off', () => {
+  test('the tear-off gesture refuses a serial tab rather than destroying it', () => {
+    const onUp = appSource.match(/if \(tearOff\) \{[\s\S]{0,2000}?detachTab\(tab\.id\);/);
+    expect(onUp).not.toBeNull();
+    expect(onUp[0]).toMatch(/tab\.isSerial/);
+    // The refusal must come BEFORE the window is opened and the tab detached.
+    expect(onUp[0].indexOf('isSerial')).toBeLessThan(onUp[0].indexOf('openNewWindow'));
   });
 });

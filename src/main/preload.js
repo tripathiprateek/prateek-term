@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('terminalAPI', {
     ipcRenderer.send('terminal:resize', { id, cols, rows }),
   killTerminal: (id) => ipcRenderer.send('terminal:kill', { id }),
   adoptTerminal: (id) => ipcRenderer.invoke('terminal:adopt', id),
+  // Tear-off: the old window lets go so main holds the PTY's output
+  // until the new window adopts it (see pty-handoff.js).
+  releaseTerminal: (id) => ipcRenderer.send('terminal:release', { id }),
   onTerminalData: (callback) => {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on('terminal:data', listener);
@@ -70,6 +73,9 @@ contextBridge.exposeInMainWorld('terminalAPI', {
   selectDirectoryDialog: (options) =>
     ipcRenderer.invoke('dialog:selectDirectory', options),
   openChromeWithProxy: (port, filterMode, filterList) => ipcRenderer.invoke('shell:openChromeProxy', { port, filterMode, filterList }),
+  // Terminal/web links → the OS default browser. Main validates the scheme.
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  listBrowsers: () => ipcRenderer.invoke('browsers:list'),
 
   // Key operations
   saveTempKey: (pemContent) => ipcRenderer.invoke('key:saveTempKey', pemContent),
