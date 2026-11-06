@@ -1292,15 +1292,36 @@ ipcMain.handle('settings:choose-path', async () => {
 
 const SESSION_PATH = path.join(app.getPath('userData'), 'session.json');
 
+// session.json belongs to the primary window alone.
+//
+// Every window runs the same renderer, so every window used to write this one
+// file. Tear a tab off a 5-tab window and quit: both windows fire beforeunload
+// in undefined order, and if the 1-tab window lands last it is the whole saved
+// session. Worse, a secondary window starts empty by design — it never calls
+// restoreSession — so closing an unused one took the "no tabs left" branch and
+// deleted session.json outright.
+//
+// Secondary windows are not restored on launch, so nothing is lost by refusing
+// their writes. Guarding here rather than in the renderer covers every caller
+// at once, and main is the side that actually knows which window is primary.
+function isPrimaryWindow(sender) {
+  return !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents;
+}
+
 // Synchronous save so beforeunload can block until written
 ipcMain.on('session:save-sync', (event, data) => {
+  // Answer first, on every path: an unanswered sendSync hangs that renderer.
+  event.returnValue = true;
+  if (!isPrimaryWindow(event.sender)) {
+    dbgLog('[session] save ignored - not the primary window');
+    return;
+  }
   try {
     fs.writeFileSync(SESSION_PATH, JSON.stringify(data, null, 2), 'utf8');
     dbgLog(`[session] saved ${(data.tabs||[]).length} tabs to "${SESSION_PATH}"`);
   } catch (e) {
     dbgLog(`[session] save error: ${e.message}`);
   }
-  event.returnValue = true;
 });
 
 ipcMain.handle('session:load', () => {
@@ -1316,7 +1337,11 @@ ipcMain.handle('session:load', () => {
   }
 });
 
-ipcMain.on('session:clear', () => {
+ipcMain.on('session:clear', (event) => {
+  if (!isPrimaryWindow(event.sender)) {
+    dbgLog('[session] clear ignored - not the primary window');
+    return;
+  }
   try {
     if (fs.existsSync(SESSION_PATH)) fs.unlinkSync(SESSION_PATH);
     dbgLog('[session] cleared');
