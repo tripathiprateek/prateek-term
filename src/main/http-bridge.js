@@ -75,6 +75,18 @@ function ensureBuf(id) {
   return outputBuffers.get(key);
 }
 
+/**
+ * Record a PTY's exit code so a transfer can be judged on it.
+ *
+ * main.js calls this from the PTY's onExit, before dropping the session from
+ * `terminals` — runScpTransfer's wait loop keys on that removal and then reads
+ * the code back out of the buffer entry.
+ */
+function noteExit(id, exitCode) {
+  const entry = outputBuffers.get(String(id));
+  if (entry) entry.exitCode = exitCode;
+}
+
 function appendOutput(id, data) {
   const key = String(id);
   if (!outputBuffers.has(key)) return; // session not MCP-managed
@@ -319,6 +331,29 @@ function resolveAiProfile(profileName) {
   return { profile };
 }
 
+/**
+ * A transfer succeeded iff scp exited 0 — never infer it from the output text.
+ *
+ * This was a regex over the PTY buffer:
+ *   /permission denied|no such file|connection refused|lost connection/i
+ * The PTY carries the REMOTE SHELL's chatter as well as scp's own, and a
+ * Raspberry Pi whose en_US.UTF-8 locale was never generated greets every
+ * connection with
+ *
+ *   bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8): No such file or directory
+ *
+ * which matches /no such file/. Every upload to that device answered HTTP 500
+ * while delivering the file byte-for-byte intact (verified by md5 on the
+ * device). The converse is worse: a device that failed without printing one of
+ * those four phrases was reported as a success.
+ *
+ * The UI drag-drop path in main.js has always used `exitCode !== 0`. This is
+ * the same rule, applied where the MCP bridge had gone its own way.
+ */
+function scpFailed(result) {
+  return result.exitCode !== 0;
+}
+
 async function runScpTransfer(profile, scpTargets, timeout_ms) {
   // -O forces the legacy SCP protocol (dropbear/BusyBox devices have no sftp
   // subsystem). StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null keep the
@@ -366,7 +401,7 @@ async function runScpTransfer(profile, scpTargets, timeout_ms) {
       const sshpassBin = platform.whichBin('sshpass',
         ['/opt/homebrew/bin/sshpass', '/usr/local/bin/sshpass', '/usr/bin/sshpass']);
       if (!sshpassBin) {
-        return { output: 'ERROR: password-based file transfer requires sshpass, which is not available on this platform. Use key-based authentication for SCP/SFTP instead.' };
+        return { output: 'ERROR: password-based file transfer requires sshpass, which is not available on this platform. Use key-based authentication for SCP/SFTP instead.', exitCode: 127 };
       }
       const pwPath = path.join(os.tmpdir(), `prateek-term-pw-${crypto.randomBytes(4).toString('hex')}`);
       fs.writeFileSync(pwPath, profile.password, { mode: 0o600 });
@@ -396,10 +431,17 @@ async function runScpTransfer(profile, scpTargets, timeout_ms) {
 
     const entry = outputBuffers.get(scpSessionId);
     if (entry) scpOutput = stripAnsi(entry.buf);
-    if (_terminals.has(Number(scpSessionId))) _killSession(scpSessionId);
+    // Recorded by noteExit when the PTY ended. Still undefined here only if we
+    // gave up before scp did — a timeout, which is a failure however harmless
+    // the partial output looks.
+    const exitCode = entry ? entry.exitCode : undefined;
+    if (_terminals.has(Number(scpSessionId))) {
+      _killSession(scpSessionId);
+      scpOutput += `\n[prateek-term] transfer timed out after ${timeoutMs}ms and was killed.`;
+    }
     outputBuffers.delete(scpSessionId);
 
-    return { output: scpOutput };
+    return { output: scpOutput, exitCode };
   } finally {
     for (const f of cleanupFiles) { try { fs.unlinkSync(f); } catch { /* already gone */ } }
   }
@@ -705,8 +747,8 @@ async function handleRequest(req, res) {
     const profile = profileErr.profile;
     const userHost = profile.username ? `${profile.username}@${profile.host}` : profile.host;
     const result = await runScpTransfer(profile, [localPath, `${userHost}:${remotePath}`], timeout_ms);
-    const failed = /permission denied|no such file|connection refused|lost connection/i.test(result.output);
-    return send(res, failed ? 500 : 200, { ok: !failed, output: result.output });
+    const failed = scpFailed(result);
+    return send(res, failed ? 500 : 200, { ok: !failed, output: result.output, exitCode: result.exitCode ?? null });
   }
 
   // ── POST /download ────────────────────────────────────────────────────
@@ -722,9 +764,9 @@ async function handleRequest(req, res) {
     const profile = profileErr.profile;
     const userHost = profile.username ? `${profile.username}@${profile.host}` : profile.host;
     const result = await runScpTransfer(profile, [`${userHost}:${remotePath}`, localPath], timeout_ms);
-    const failed = /permission denied|no such file|connection refused|lost connection/i.test(result.output);
-    const fileExists = !failed && fs.existsSync(localPath);
-    return send(res, failed ? 500 : 200, { ok: fileExists, output: result.output });
+    // scp exiting 0 without producing the file would be a lie we must not pass on.
+    const failed = scpFailed(result) || !fs.existsSync(localPath);
+    return send(res, failed ? 500 : 200, { ok: !failed, output: result.output, exitCode: result.exitCode ?? null });
   }
 
   // ── POST /profiles ────────────────────────────────────────────────────
@@ -894,6 +936,6 @@ function getPort() { return _port; }
 function getToken() { return _token; }
 
 module.exports = {
-  start, stop, isRunning, getPort, getToken, appendOutput, ensureBuf,
+  start, stop, isRunning, getPort, getToken, appendOutput, ensureBuf, noteExit,
   validateLocalPath, looksLikeHostname, reapClosedBuffers, normalizeTags,
 };

@@ -82,7 +82,12 @@ function bridgeRequest(method, urlPath, body) {
         try {
           const parsed = JSON.parse(data);
           if (res.statusCode >= 400) {
-            reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
+            // /upload and /download put the reason in `output`, not `error`.
+            // Falling straight through to the status line reduced a readable
+            // scp failure to a bare "HTTP 500" with the cause thrown away.
+            const detail = parsed.error
+              || (parsed.output ? String(parsed.output).trim().slice(-2000) : '');
+            reject(new Error(detail || `HTTP ${res.statusCode}`));
           } else {
             resolve(parsed);
           }

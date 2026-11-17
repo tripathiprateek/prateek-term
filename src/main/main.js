@@ -2165,7 +2165,12 @@ function spawnPtyForBridge(options) {
   }
 
   const cleanupFiles = options._cleanupFiles || [];
-  term.onExit(() => {
+  term.onExit(({ exitCode }) => {
+    // Record before the delete: runScpTransfer's wait loop breaks the moment
+    // this id leaves `terminals`, then reads the code back to judge the
+    // transfer. Judging by output text instead once turned a byte-perfect
+    // upload into an HTTP 500 — see scpFailed in http-bridge.js.
+    bridge.noteExit(id, exitCode);
     terminals.delete(id);
     for (const f of cleanupFiles) { try { fs.unlinkSync(f); } catch { /* gone */ } }
   });
