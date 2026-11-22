@@ -35,7 +35,7 @@ describe('PTY spawn — login shell (BUG-004)', () => {
 
   test('loginShellArgs resolves before pty.spawn call', () => {
     const loginIdx = src.indexOf('platform.loginShellArgs()');
-    const spawnIdx = src.indexOf('pty.spawn(shell');
+    const spawnIdx = src.indexOf('spawnTracked(shell');
     expect(loginIdx).toBeGreaterThan(-1);
     expect(spawnIdx).toBeGreaterThan(-1);
     expect(loginIdx).toBeLessThan(spawnIdx);
