@@ -30,13 +30,14 @@ describe('allowed roots', () => {
     ok(path.join(os.tmpdir(), 'build.ipk'));
   });
 
-  test('/tmp — the reported bug', () => {
+  const posix = process.platform !== 'win32';
+
+  (posix ? test : test.skip)('/tmp — the reported bug', () => {
     // os.tmpdir() is /var/folders/…/T on macOS, so /tmp was refused despite the
-    // error message promising "temp directory".
+    // error message promising "temp directory". On Windows '/tmp' is C:\tmp,
+    // not a temp dir, and refusing it is correct.
     ok('/tmp/build.ipk');
   });
-
-  const posix = process.platform !== 'win32';
   const realTmp = () => fs.realpathSync(posix ? '/tmp' : os.tmpdir());
 
   (posix ? test : test.skip)('/tmp resolved through its symlink', () => {

@@ -125,7 +125,8 @@ describe('exit tracker', () => {
   });
 
   test('a PTY that ignores SIGHUP is escalated to SIGKILL', async () => {
-    const tracker = createExitTracker();
+    // Explicit: the default is off on win32 (see the Windows test below).
+    const tracker = createExitTracker({ escalate: true });
     const stubborn = fakeTerm();
     tracker.track(stubborn);
     const d = startDrain(tracker, { killAfterMs: 100, giveUpAfterMs: 1000 });
