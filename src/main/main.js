@@ -54,7 +54,14 @@ const { isSafeExternalUrl } = require('./external-links');
 const browsers = require('./browsers');
 const { checkDependencies } = require('./dependencies');
 const { createHandoff } = require('./pty-handoff');
+const { createExitTracker } = require('./pty-exit-tracker');
 const { runHealthChecks } = require('./health-checks');
+
+// Every PTY is spawned through here so quit can wait for its exit event. An
+// exit that lands after Node's environment is freed aborts the app (SIGABRT);
+// see pty-exit-tracker.js.
+const exitTracker = createExitTracker();
+const spawnTracked = (...args) => exitTracker.track(pty.spawn(...args));
 
 // Startup self-check: which external CLI tools are present and new enough, plus
 // environment problems that silently break SSH (wedged ssh-agent, ~/.ssh
@@ -824,6 +831,25 @@ app.on('will-quit', () => {
   scpTransfers.clear();
 });
 
+// The kills above only *request* exits. Closed windows already killed their
+// PTYs and dropped them from `terminals`, so nothing there says whether any exit
+// is still in flight. Quitting now frees Node's environment under those pending
+// exits and aborts the process (SIGABRT). Hold the quit until each has been
+// delivered, then quit again. See pty-exit-tracker.js.
+// The MCP bridge stops first: a `connect` mid-drain would spawn a PTY the
+// hang-up missed, and one after quitDrained would not be waited for at all.
+let quitDrained = false;
+app.on('will-quit', (event) => {
+  bridge.stop();
+  if (quitDrained || !exitTracker.pending) return;
+  event.preventDefault();
+  exitTracker.drain().then((ok) => {
+    if (!ok) dbgLog('[quit] a PTY never reported its exit; quitting anyway');
+    quitDrained = true;
+    app.quit();
+  });
+});
+
 app.on('window-all-closed', () => {
   app.quit();
 });
@@ -907,7 +933,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   const fallbackShell = platform.isWindows() ? (process.env.COMSPEC || 'cmd.exe') : '/bin/sh';
   let term;
   try {
-    term = pty.spawn(shell, args, {
+    term = spawnTracked(shell, args, {
       name: 'xterm-256color',
       cols: options.cols || 80,
       rows: options.rows || 24,
@@ -918,7 +944,7 @@ ipcMain.handle('terminal:create', (event, options = {}) => {
   } catch (err) {
     dbgLog(`[pty:${id}] spawn failed shell="${shell}" cwd="${cwd}" err="${err.message}" — falling back to ${fallbackShell}`);
     dbgLog(`[pty] Failed to spawn shell "${shell}" in "${cwd}": ${err.message}`);
-    term = pty.spawn(fallbackShell, platform.isWindows() ? [] : args, {
+    term = spawnTracked(fallbackShell, platform.isWindows() ? [] : args, {
       name: 'xterm-256color',
       cols: options.cols || 80,
       rows: options.rows || 24,
@@ -1292,15 +1318,36 @@ ipcMain.handle('settings:choose-path', async () => {
 
 const SESSION_PATH = path.join(app.getPath('userData'), 'session.json');
 
+// session.json belongs to the primary window alone.
+//
+// Every window runs the same renderer, so every window used to write this one
+// file. Tear a tab off a 5-tab window and quit: both windows fire beforeunload
+// in undefined order, and if the 1-tab window lands last it is the whole saved
+// session. Worse, a secondary window starts empty by design — it never calls
+// restoreSession — so closing an unused one took the "no tabs left" branch and
+// deleted session.json outright.
+//
+// Secondary windows are not restored on launch, so nothing is lost by refusing
+// their writes. Guarding here rather than in the renderer covers every caller
+// at once, and main is the side that actually knows which window is primary.
+function isPrimaryWindow(sender) {
+  return !!mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents;
+}
+
 // Synchronous save so beforeunload can block until written
 ipcMain.on('session:save-sync', (event, data) => {
+  // Answer first, on every path: an unanswered sendSync hangs that renderer.
+  event.returnValue = true;
+  if (!isPrimaryWindow(event.sender)) {
+    dbgLog('[session] save ignored - not the primary window');
+    return;
+  }
   try {
     fs.writeFileSync(SESSION_PATH, JSON.stringify(data, null, 2), 'utf8');
     dbgLog(`[session] saved ${(data.tabs||[]).length} tabs to "${SESSION_PATH}"`);
   } catch (e) {
     dbgLog(`[session] save error: ${e.message}`);
   }
-  event.returnValue = true;
 });
 
 ipcMain.handle('session:load', () => {
@@ -1316,7 +1363,11 @@ ipcMain.handle('session:load', () => {
   }
 });
 
-ipcMain.on('session:clear', () => {
+ipcMain.on('session:clear', (event) => {
+  if (!isPrimaryWindow(event.sender)) {
+    dbgLog('[session] clear ignored - not the primary window');
+    return;
+  }
   try {
     if (fs.existsSync(SESSION_PATH)) fs.unlinkSync(SESSION_PATH);
     dbgLog('[session] cleared');
@@ -1826,7 +1877,7 @@ ipcMain.handle('scp:upload', (event, { filePath, fileName, profile, remotePath }
 
   let proc;
   try {
-    proc = pty.spawn(platform.resolveCommand(wrapped.command), wrapped.args, {
+    proc = spawnTracked(platform.resolveCommand(wrapped.command), wrapped.args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 10,
@@ -2107,7 +2158,7 @@ function spawnPtyForBridge(options) {
   const id   = ++terminalIdCounter;
   // Register the output buffer BEFORE spawning so no early PTY data is lost
   bridge.ensureBuf(id);
-  const term = pty.spawn(shell, args, { name: 'xterm-256color', cols: options.cols || 200, rows: options.rows || 50, cwd, env });
+  const term = spawnTracked(shell, args, { name: 'xterm-256color', cols: options.cols || 200, rows: options.rows || 50, cwd, env });
   // Tag with profile name so remove_profile can detect active sessions
   if (options.profileName) term._profileName = options.profileName;
   terminals.set(id, term);
@@ -2140,7 +2191,12 @@ function spawnPtyForBridge(options) {
   }
 
   const cleanupFiles = options._cleanupFiles || [];
-  term.onExit(() => {
+  term.onExit(({ exitCode }) => {
+    // Record before the delete: runScpTransfer's wait loop breaks the moment
+    // this id leaves `terminals`, then reads the code back to judge the
+    // transfer. Judging by output text instead once turned a byte-perfect
+    // upload into an HTTP 500 — see scpFailed in http-bridge.js.
+    bridge.noteExit(id, exitCode);
     terminals.delete(id);
     for (const f of cleanupFiles) { try { fs.unlinkSync(f); } catch { /* gone */ } }
   });

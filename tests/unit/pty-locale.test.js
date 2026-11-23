@@ -44,7 +44,7 @@ describe('PTY environment — UTF-8 locale (BUG-003 / issue #3)', () => {
   test('locale is set in the same env block as TERM (before pty.spawn)', () => {
     const termIdx   = src.indexOf("env.TERM = 'xterm-256color'");
     const langIdx   = src.search(/env\.LANG\s*=\s*'en_US\.UTF-8'/);
-    const spawnIdx  = src.indexOf('pty.spawn(');
+    const spawnIdx  = src.indexOf('spawnTracked('); // first call: terminal:create
     // LANG must appear after TERM is set and before pty.spawn is called
     expect(termIdx).toBeGreaterThan(-1);
     expect(langIdx).toBeGreaterThan(termIdx);
